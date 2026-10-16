@@ -30,6 +30,8 @@ pub struct LoadedFile {
     /// `true` si el texto original coincide con el formato normalizado, de
     /// modo que los números de línea son exactamente los del archivo.
     pub lines_exact: bool,
+    /// Contenido de texto en crudo para visualización en editor y visor git.
+    pub content: String,
 }
 
 /// Celda de una fila: valor de una ruta en un archivo concreto.
@@ -80,14 +82,13 @@ impl Comparison {
 
 // ---------------------------------------------------------------- carga
 
-pub fn load_file(path: &Path) -> Result<LoadedFile, String> {
-    let text =
-        fs::read_to_string(path).map_err(|e| format!("No se pudo leer {}: {e}", path.display()))?;
-    let text = text.trim_start_matches('\u{feff}');
-    let value: Value = serde_json::from_str(text)
+/// Carga y parsea un archivo JSON a partir de una cadena de texto en memoria.
+pub fn load_file_from_str(path: &Path, text: &str) -> Result<LoadedFile, String> {
+    let clean = text.trim_start_matches('\u{feff}');
+    let value: Value = serde_json::from_str(clean)
         .map_err(|e| format!("JSON inválido en {}: {e}", path.display()))?;
     let (rendered, leaves) = flatten(&value);
-    let lines_exact = text.trim_end().replace("\r\n", "\n") == rendered;
+    let lines_exact = clean.trim_end().replace("\r\n", "\n") == rendered;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -97,7 +98,29 @@ pub fn load_file(path: &Path) -> Result<LoadedFile, String> {
         name,
         leaves,
         lines_exact,
+        content: text.to_string(),
     })
+}
+
+pub fn load_file(path: &Path) -> Result<LoadedFile, String> {
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("No se pudo leer {}: {e}", path.display()))?;
+    load_file_from_str(path, &text)
+}
+
+/// Formatea e indenta una cadena JSON con 2 espacios.
+pub fn format_json(text: &str) -> Result<String, String> {
+    let clean = text.trim_start_matches('\u{feff}');
+    let value: Value =
+        serde_json::from_str(clean).map_err(|e| format!("Error al analizar JSON: {e}"))?;
+    serde_json::to_string_pretty(&value).map_err(|e| format!("Error al formatear JSON: {e}"))
+}
+
+/// Valida si una cadena de texto contiene JSON sintácticamente correcto.
+pub fn validate_json(text: &str) -> Result<(), String> {
+    let clean = text.trim_start_matches('\u{feff}');
+    let _: Value = serde_json::from_str(clean).map_err(|e| format!("JSON inválido: {e}"))?;
+    Ok(())
 }
 
 // -------------------------------------------------------------- aplanado
@@ -396,12 +419,13 @@ mod tests {
 
     fn load(json: &str, name: &str) -> LoadedFile {
         let v: Value = serde_json::from_str(json).unwrap();
-        let (_, leaves) = flatten(&v);
+        let (rendered, leaves) = flatten(&v);
         LoadedFile {
             path: PathBuf::from(name),
             name: name.into(),
             leaves,
             lines_exact: true,
+            content: rendered,
         }
     }
 
@@ -502,5 +526,21 @@ mod tests {
         assert!(csv.contains("Diferencia,Campo"));
         assert!(csv.contains("SI,\"x\""));
         assert!(csv.contains("NO,\"y\""));
+    }
+
+    #[test]
+    fn test_format_and_validate_json() {
+        let raw = r#"{"b":2,"a":1}"#;
+        assert!(validate_json(raw).is_ok());
+
+        let invalid = r#"{"b":2,"a":}"#;
+        assert!(validate_json(invalid).is_err());
+
+        let formatted = format_json(raw).unwrap();
+        assert!(formatted.contains("{\n  \"b\": 2,\n  \"a\": 1\n}"));
+
+        let file = load_file_from_str(Path::new("test.json"), raw).unwrap();
+        assert_eq!(file.content, raw);
+        assert_eq!(file.leaves.len(), 2);
     }
 }

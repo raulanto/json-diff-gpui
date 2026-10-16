@@ -6,19 +6,18 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
 
 ## Qué hace
 
-- Compara 2, 3, 4, 5 o 6 archivos a la vez.
-- **Selector de archivo base dinámico**: cambia el archivo base con un clic en «Hacer base» en la columna que desees.
-- Una **columna por archivo**; cada celda muestra `L<línea>  <valor>`, indicando en qué línea abrir el archivo.
-- Resalta las filas con diferencias y, dentro de ellas, las celdas que difieren del archivo base activo.
-- Marca `(no existe)` con distintivos claros cuando un campo falta en alguno de los archivos.
-- Detecta **cambios de tipo** (`"17"` vs `17`, `""` vs `null`), que a simple vista pasan desapercibidos.
-- **Búsqueda en tiempo real**: filtra campos o valores al instante mediante el campo de búsqueda integrado.
-- **Copiar al portapapeles**: copia la ruta del campo con un clic en su icono o copia el valor de cualquier celda.
-- **Exportar a Markdown**: botón en la barra superior para copiar un reporte estructurado en Markdown al portapapeles.
+- **Tres modos de visualización integrados**:
+  - **Tabla (Matriz)**: compara de 2 a 6 archivos JSON a la vez con columnas independientes, rutas aplanadas y números de línea exactos.
+  - **Diff Estilo Git (`DiffViewer`)**: visor unificado (`Unified`) o dividido (`Split` lado a lado) con estadísticas de cambios (`+agregados -eliminados`), resaltado de palabras y plegado de líneas idénticas.
+  - **Editor en Vivo (`CodeEditor`)**: edición directa del JSON con resaltado de sintaxis, números de línea, marcas en el gutter respecto al archivo base, formateo automático (pretty-print con 2 espacios), validación sintáctica, aplicación de cambios en memoria al diff al instante y guardado en disco.
+- **Selector de archivo base dinámico**: cambia el archivo base con un clic en «Hacer base» en la columna que desees o selecciónalo para contrastar en el Diff Git.
+- **Búsqueda en tiempo real**: filtra campos o valores al instante mediante el campo de búsqueda integrado en la tabla.
+- **Copiar al portapapeles y exportar**: copia la ruta del campo o valores individuales al portapapeles, o exporta el reporte tabular a Markdown.
 - **Tema claro / oscuro**: alterna entre modos visuales usando el sistema de temas de Ely Components.
 - Interruptor **solo cambios / todo** mediante control segmentado.
 - Abrir archivos con el diálogo del sistema o **arrastrándolos** a la ventana.
 - Modo `--cli` para terminal (sin ventana).
+
 
 ## Uso
 
