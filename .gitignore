@@ -1,0 +1,28 @@
+# Compilación de Rust
+/target/
+
+# Cargo.lock SÍ se versiona (es una aplicación, no una librería)
+
+# Respaldos JSON de solicitudes: contienen datos personales (RFC, CURP, teléfonos, cuentas)
+*_promotor_*.json
+
+# Editores / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Variables de entorno y temporales
+.env
+*.log
+*.tmp
+
+# Paquetes generados
+*.tar.gz
+*.zip

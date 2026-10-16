@@ -1,0 +1,28 @@
+[package]
+name = "json-diff-gpui"
+version = "0.1.0"
+edition = "2021"
+description = "Compara de 2 a 6 archivos JSON y resalta qué líneas cambiaron (GPUI)"
+
+[lib]
+name = "jsondiff"
+path = "src/lib.rs"
+
+[[bin]]
+name = "json-diff"
+path = "src/main.rs"
+
+[features]
+default = ["gui"]
+# La interfaz gráfica es opcional para poder probar el núcleo sin compilar GPUI:
+#   cargo test --no-default-features
+gui = ["dep:gpui", "dep:gpui_platform", "dep:ely-gpui-component"]
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components", optional = true }
+gpui = { package = "gpui-pre", version = "=0.3.8", optional = true }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "wayland", "x11"], optional = true }
+
+[profile.release]
+lto = "thin"
