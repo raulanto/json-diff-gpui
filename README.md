@@ -21,6 +21,26 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
 - **Selector de archivo base dinámico**: cambia el archivo base con un clic en «Hacer base» en la columna que desees o selecciónalo para contrastar en el Diff Git.
 - **Búsqueda en tiempo real**: filtra campos o valores al instante mediante el campo de búsqueda integrado en la tabla.
 - **Copiar al portapapeles y exportar**: copia la ruta del campo o valores individuales al portapapeles, o exporta el reporte tabular a Markdown.
+- **Paleta de Comandos Rápida (`CommandPalette`)**:
+  - Accede a cualquier acción, vista o comando con `Ctrl+K` / `Cmd+K` (o mediante el botón en el toolbar y pantalla principal).
+  - Búsqueda difusa (fuzzy search) en tiempo real con resaltado de coincidencias y navegación por teclado.
+- **Configuración de la Aplicación (`Dialog` + `Settings`)**:
+  - Modal estilizado con componentes de Ely (`Dialog`, `SettingsSection`, `SettingsRow`) accesible con `Ctrl+,` / `Cmd+,` o el botón de engranaje.
+  - Permite configurar tema visual (Oscuro / Claro), modo de comparación por defecto (Base fija vs En cadena), filtro de visualización inicial y selector de subestructuras.
+  - Pestaña con catálogo interactivo de atajos de teclado (`KeyboardShortcutsList`) con buscador en tiempo real.
+- **Atajos de Teclado Globales**:
+  - `Ctrl+K` / `Ctrl+P`: Abrir/cerrar paleta de comandos
+  - `Ctrl+,`: Abrir/cerrar configuración de la aplicación
+  - `Ctrl+O`: Abrir diálogo para seleccionar archivos JSON
+  - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`: Alternar entre Vista Tabla, Diff Git y Editor
+  - `Ctrl+M`: Alternar modo de comparación (Base fija ↔ En cadena)
+  - `Ctrl+Shift+C`: Alternar filtro (Solo cambios ↔ Ver todos)
+  - `Ctrl+Shift+M`: Copiar reporte Markdown al portapapeles
+  - `Ctrl+Shift+L`: Limpiar todos los archivos cargados
+  - `Ctrl+Shift+I`: Formatear JSON con 2 espacios en el editor
+  - `Ctrl+S`: Guardar archivo editado en disco
+  - `Ctrl+T`: Alternar tema (Claro / Oscuro)
+  - `Esc`: Cerrar cualquier diálogo o paleta activa
 - **Limpieza y remoción de archivos**: botón «Limpiar» en la barra superior para descargar todos los archivos y volver a la pantalla de bienvenida; botones individuales (`✕`) en cada columna para descartar archivos específicos cuando hay más de 2; y botón de reinicio en estados de error.
 - **Tema claro / oscuro**: alterna entre modos visuales usando el sistema de temas de Ely Components.
 - Interruptor **solo cambios / todo** mediante control segmentado.

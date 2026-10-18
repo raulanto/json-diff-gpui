@@ -23,6 +23,9 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - Vista Tabla (Matriz virtualizada con `uniform_list`, selector de estructura JSONPath reactivo con botón de restauración a `$`, celdas enriquecidas con `Badge`, gutter de líneas, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
   - Vista Diff Git (`DiffViewer` en modo Unified y Split con estadísticas `DiffStat`).
   - Vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
+  - Paleta de Comandos (`CommandPalette` de Ely con búsqueda difusa, navegación por flechas y ejecución con Enter).
+  - Modal de Configuración (`Dialog`, `SettingsSection`, `SettingsRow` y `KeyboardShortcutsList` con catálogo reactivo de atajos).
+  - Atajos de teclado globales (`capture_key_down` con `Ctrl+K`, `Ctrl+,`, `Ctrl+O`, `Ctrl+1..3`, `Ctrl+M`, `Ctrl+Shift+C`, `Ctrl+Shift+M`, `Ctrl+Shift+I`, `Ctrl+S`, `Ctrl+T`, `Esc`).
 - `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI (soporta `-s|--selector <QUERY>`).
 
 Regla: cualquier cambio de comportamiento se implementa en `lib.rs` con prueba; la UI solo lo consume.
@@ -69,4 +72,6 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 - [x] Exportar el reporte a Markdown/CSV (implementado en `lib.rs` con botón de copia en la UI).
 - [x] Comparación en cadena secuencial (1 vs 0, 2 vs 1, 3 vs 2...) y reordenamiento de archivos (hasta 10 JSON).
 - [x] Lenguaje selector JSONPath (`$.data`, `$.items[*]`, `$..id`, unión `,`) para extraer y enfocar subestructuras concretas.
+- [x] Paleta de comandos interactiva (`CommandPalette`) con búsqueda fuzzy y atajos de teclado globales.
+- [x] Modal de Configuración de la aplicación (`Dialog` con secciones generales y catálogo reactivo de atajos).
 - [ ] Comparar arreglos por clave (p. ej. por `id`) en vez de por índice.

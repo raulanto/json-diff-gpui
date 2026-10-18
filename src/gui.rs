@@ -18,13 +18,17 @@ use ely_gpui_component::{
     editor::{CodeEditor, GitMark, LineNumbers},
     forms::{Input, InputEvent, TextInput},
     git::{diff, DiffLayout, DiffViewer, LineKind, Stretch},
+    navigation::{Command, CommandPalette},
+    overlays::Dialog,
     primitives::{Icon, IconName, Tooltip},
+    settings::{KeyboardShortcutsList, SettingsRow, SettingsSection, Shortcut},
     theme::{ActiveTheme, ControlSize, Elevation, IconSize, Mode, Radius, TextSize, Theme},
+    typography::KbdCombo,
 };
 use gpui::{
     div, prelude::*, px, size, uniform_list, App, Bounds, ClipboardItem, Context, Entity,
-    ExternalPaths, FontWeight, PathPromptOptions, SharedString, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowOptions,
+    ExternalPaths, FocusHandle, FontWeight, KeyDownEvent, PathPromptOptions, SharedString,
+    Subscription, TitlebarOptions, Window, WindowBounds, WindowOptions,
 };
 use jsondiff::{
     compare_paths_with_base, compare_with_base, detect_json_type, export_markdown, format_json,
@@ -43,6 +47,13 @@ pub enum ViewMode {
     Table,
     GitDiff,
     Editor,
+}
+
+/// Pestañas del diálogo de Configuración.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsTab {
+    General,
+    Shortcuts,
 }
 
 pub struct DiffView {
@@ -70,6 +81,18 @@ pub struct DiffView {
     // Estado para vista Editor
     editor_file_idx: usize,
     editor: Option<Entity<CodeEditor>>,
+
+    // Paleta de comandos (Command Palette)
+    show_command_palette: bool,
+
+    // Configuración de la aplicación
+    show_settings: bool,
+    settings_tab: SettingsTab,
+    settings_shortcuts_search: Entity<TextInput>,
+    _settings_sub: Subscription,
+
+    // Foco global para captura de atajos
+    focus_handle: FocusHandle,
 
     // Notificaciones / Toast
     status_toast: Option<SharedString>,
@@ -128,6 +151,21 @@ impl DiffView {
                 },
             );
 
+        let settings_shortcuts_search =
+            cx.new(|cx| TextInput::new(window, cx).placeholder("Buscar atajos de teclado…"));
+
+        let settings_sub = cx.subscribe(
+            &settings_shortcuts_search,
+            |_this, _entity, event: &InputEvent, cx| {
+                if let InputEvent::Changed = event {
+                    cx.notify();
+                }
+            },
+        );
+
+        let focus_handle = cx.focus_handle();
+        window.focus(&focus_handle, cx);
+
         let mut v = Self {
             paths,
             comparison: None,
@@ -145,6 +183,12 @@ impl DiffView {
             git_open_stretches: Vec::new(),
             editor_file_idx: 0,
             editor: None,
+            show_command_palette: false,
+            show_settings: false,
+            settings_tab: SettingsTab::General,
+            settings_shortcuts_search,
+            _settings_sub: settings_sub,
+            focus_handle,
             status_toast: None,
         };
         v.reload();
@@ -469,6 +513,633 @@ impl DiffView {
         self.apply_editor_changes(cx);
         self.show_toast(format!("Guardado exitosamente en {}", name), cx);
     }
+
+    /// Lista exhaustiva de atajos de teclado registrados en la aplicación.
+    pub fn shortcuts_list() -> Vec<Shortcut> {
+        vec![
+            Shortcut {
+                group: "General & Navegación".into(),
+                name: "Abrir paleta de comandos".into(),
+                keys: "secondary-k".into(),
+            },
+            Shortcut {
+                group: "General & Navegación".into(),
+                name: "Abrir Configuración de la aplicación".into(),
+                keys: "secondary-,".into(),
+            },
+            Shortcut {
+                group: "General & Navegación".into(),
+                name: "Abrir archivos JSON del disco".into(),
+                keys: "secondary-o".into(),
+            },
+            Shortcut {
+                group: "General & Navegación".into(),
+                name: "Cerrar paleta de comandos / diálogos".into(),
+                keys: "escape".into(),
+            },
+            Shortcut {
+                group: "Vistas".into(),
+                name: "Ver: Tabla matricial".into(),
+                keys: "secondary-1".into(),
+            },
+            Shortcut {
+                group: "Vistas".into(),
+                name: "Ver: Diff estilo Git".into(),
+                keys: "secondary-2".into(),
+            },
+            Shortcut {
+                group: "Vistas".into(),
+                name: "Ver: Editor en vivo".into(),
+                keys: "secondary-3".into(),
+            },
+            Shortcut {
+                group: "Comparación y Filtros".into(),
+                name: "Alternar modo: Base fija / En cadena".into(),
+                keys: "secondary-m".into(),
+            },
+            Shortcut {
+                group: "Comparación y Filtros".into(),
+                name: "Alternar filtro: Solo cambios / Todos".into(),
+                keys: "secondary-shift-c".into(),
+            },
+            Shortcut {
+                group: "Comparación y Filtros".into(),
+                name: "Copiar reporte Markdown".into(),
+                keys: "secondary-shift-m".into(),
+            },
+            Shortcut {
+                group: "Comparación y Filtros".into(),
+                name: "Limpiar todos los archivos cargados".into(),
+                keys: "secondary-shift-l".into(),
+            },
+            Shortcut {
+                group: "Editor".into(),
+                name: "Formatear JSON (2 espacios)".into(),
+                keys: "secondary-shift-i".into(),
+            },
+            Shortcut {
+                group: "Editor".into(),
+                name: "Guardar archivo editado en disco".into(),
+                keys: "secondary-s".into(),
+            },
+            Shortcut {
+                group: "Personalización".into(),
+                name: "Alternar tema (Claro / Oscuro)".into(),
+                keys: "secondary-t".into(),
+            },
+        ]
+    }
+
+    /// Ejecuta la acción seleccionada desde la paleta de comandos.
+    fn run_command_action(&mut self, action: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_command_palette = false;
+        match action {
+            "open_files" => self.pick_files(cx),
+            "clear_files" => self.clear_files(cx),
+            "view_table" => {
+                self.view_mode = ViewMode::Table;
+                self.editor = None;
+                cx.notify();
+            }
+            "view_git" => {
+                self.view_mode = ViewMode::GitDiff;
+                self.editor = None;
+                cx.notify();
+            }
+            "view_editor" => {
+                self.view_mode = ViewMode::Editor;
+                self.init_editor_if_needed(window, cx);
+                cx.notify();
+            }
+            "toggle_diff_mode" => {
+                if let Some(c) = &mut self.comparison {
+                    let new_mode = match c.diff_mode {
+                        DiffMode::FixedBase => DiffMode::Sequential,
+                        DiffMode::Sequential => DiffMode::FixedBase,
+                    };
+                    c.set_diff_mode(new_mode);
+                    self.refilter();
+                    self.show_toast(
+                        if new_mode == DiffMode::Sequential {
+                            "Modo En cadena: cada archivo se compara con el anterior"
+                        } else {
+                            "Modo Base fija: todos se comparan con la base"
+                        },
+                        cx,
+                    );
+                    cx.notify();
+                }
+            }
+            "toggle_filter" => {
+                self.only_changed = !self.only_changed;
+                self.refilter();
+                self.show_toast(
+                    if self.only_changed {
+                        "Filtro: Mostrando solo cambios"
+                    } else {
+                        "Filtro: Mostrando todos los campos"
+                    },
+                    cx,
+                );
+                cx.notify();
+            }
+            "reset_selector" => {
+                self.reset_selector(cx);
+            }
+            "export_markdown" => {
+                if let Some(c) = &self.comparison {
+                    let md = export_markdown(c, self.only_changed);
+                    cx.write_to_clipboard(ClipboardItem::new_string(md));
+                    self.show_toast("Reporte Markdown copiado al portapapeles", cx);
+                }
+            }
+            "format_json" => {
+                if self.view_mode != ViewMode::Editor {
+                    self.view_mode = ViewMode::Editor;
+                    self.init_editor_if_needed(window, cx);
+                }
+                self.format_editor_json(cx);
+            }
+            "validate_json" => {
+                if self.view_mode != ViewMode::Editor {
+                    self.view_mode = ViewMode::Editor;
+                    self.init_editor_if_needed(window, cx);
+                }
+                self.validate_editor_json(cx);
+            }
+            "apply_changes" => {
+                if self.view_mode == ViewMode::Editor {
+                    self.apply_editor_changes(cx);
+                }
+            }
+            "save_file" => {
+                if self.view_mode == ViewMode::Editor {
+                    self.save_editor_to_disk(cx);
+                }
+            }
+            "open_settings" => {
+                self.show_settings = true;
+                cx.notify();
+            }
+            "toggle_theme" => {
+                let next = if cx.theme().is_dark() {
+                    Mode::Light
+                } else {
+                    Mode::Dark
+                };
+                Theme::set_mode(next, cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// Maneja los atajos de teclado globales. Devuelve true si el atajo fue consumido.
+    fn handle_global_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key = event.keystroke.key.as_str();
+        let m = &event.keystroke.modifiers;
+
+        // Escape cierra cualquier modal activo
+        if key == "escape" && !m.modified() {
+            if self.show_command_palette {
+                self.show_command_palette = false;
+                cx.notify();
+                return true;
+            }
+            if self.show_settings {
+                self.show_settings = false;
+                cx.notify();
+                return true;
+            }
+            return false;
+        }
+
+        // Atajos primarios con Ctrl (Linux/Win) o Cmd (macOS)
+        if m.secondary() && !m.alt {
+            if !m.shift {
+                match key {
+                    "k" | "p" => {
+                        self.show_command_palette = !self.show_command_palette;
+                        self.show_settings = false;
+                        cx.notify();
+                        return true;
+                    }
+                    "," => {
+                        self.show_settings = !self.show_settings;
+                        self.show_command_palette = false;
+                        cx.notify();
+                        return true;
+                    }
+                    "o" => {
+                        self.pick_files(cx);
+                        return true;
+                    }
+                    "1" => {
+                        self.view_mode = ViewMode::Table;
+                        self.editor = None;
+                        cx.notify();
+                        return true;
+                    }
+                    "2" => {
+                        self.view_mode = ViewMode::GitDiff;
+                        self.editor = None;
+                        cx.notify();
+                        return true;
+                    }
+                    "3" => {
+                        self.view_mode = ViewMode::Editor;
+                        self.init_editor_if_needed(window, cx);
+                        cx.notify();
+                        return true;
+                    }
+                    "m" => {
+                        if let Some(c) = &mut self.comparison {
+                            let new_mode = match c.diff_mode {
+                                DiffMode::FixedBase => DiffMode::Sequential,
+                                DiffMode::Sequential => DiffMode::FixedBase,
+                            };
+                            c.set_diff_mode(new_mode);
+                            self.refilter();
+                            self.show_toast(
+                                if new_mode == DiffMode::Sequential {
+                                    "Modo En cadena: cada archivo se compara con el anterior"
+                                } else {
+                                    "Modo Base fija: todos se comparan con la base"
+                                },
+                                cx,
+                            );
+                            cx.notify();
+                            return true;
+                        }
+                    }
+                    "t" => {
+                        let next = if cx.theme().is_dark() {
+                            Mode::Light
+                        } else {
+                            Mode::Dark
+                        };
+                        Theme::set_mode(next, cx);
+                        return true;
+                    }
+                    "s" => {
+                        if self.view_mode == ViewMode::Editor {
+                            self.save_editor_to_disk(cx);
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                // Combinaciones con Shift (Ctrl+Shift+...)
+                match key {
+                    "c" => {
+                        self.only_changed = !self.only_changed;
+                        self.refilter();
+                        self.show_toast(
+                            if self.only_changed {
+                                "Filtro: Mostrando solo cambios"
+                            } else {
+                                "Filtro: Mostrando todos los campos"
+                            },
+                            cx,
+                        );
+                        cx.notify();
+                        return true;
+                    }
+                    "m" => {
+                        if let Some(c) = &self.comparison {
+                            let md = export_markdown(c, self.only_changed);
+                            cx.write_to_clipboard(ClipboardItem::new_string(md));
+                            self.show_toast("Reporte Markdown copiado al portapapeles", cx);
+                            return true;
+                        }
+                    }
+                    "l" => {
+                        self.clear_files(cx);
+                        return true;
+                    }
+                    "i" | "f" => {
+                        if self.view_mode == ViewMode::Editor {
+                            self.format_editor_json(cx);
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Renderiza la paleta de comandos interactiva de Ely.
+    fn render_command_palette(&self, view: Entity<Self>) -> impl IntoElement {
+        CommandPalette::new("global_command_palette", {
+            let view = view.clone();
+            move |_, cx| {
+                view.update(cx, |this, cx| {
+                    this.show_command_palette = false;
+                    cx.notify();
+                });
+            }
+        })
+        .group(
+            "Navegación y Vistas",
+            vec![
+                Command::new("view_table", "Ver: Tabla matricial")
+                    .icon(IconName::Table)
+                    .keys("secondary-1"),
+                Command::new("view_git", "Ver: Diff estilo Git")
+                    .icon(IconName::GitBranch)
+                    .keys("secondary-2"),
+                Command::new("view_editor", "Ver: Editor en vivo")
+                    .icon(IconName::Code)
+                    .keys("secondary-3"),
+            ],
+        )
+        .group(
+            "Archivos",
+            vec![
+                Command::new("open_files", "Abrir archivos JSON…")
+                    .icon(IconName::FolderOpen)
+                    .keys("secondary-o"),
+                Command::new("clear_files", "Limpiar archivos cargados")
+                    .icon(IconName::Trash2)
+                    .keys("secondary-shift-l"),
+                Command::new("export_markdown", "Copiar reporte Markdown")
+                    .icon(IconName::Copy)
+                    .keys("secondary-shift-m"),
+            ],
+        )
+        .group(
+            "Comparación y Filtros",
+            vec![
+                Command::new("toggle_diff_mode", "Alternar modo: Base fija / En cadena")
+                    .icon(IconName::SlidersHorizontal)
+                    .keys("secondary-m"),
+                Command::new("toggle_filter", "Alternar filtro: Solo cambios / Todos")
+                    .icon(IconName::Filter)
+                    .keys("secondary-shift-c"),
+                Command::new(
+                    "reset_selector",
+                    "Restaurar selector JSONPath a la raíz ($)",
+                )
+                .icon(IconName::RotateCcw),
+            ],
+        )
+        .group(
+            "Editor de Código",
+            vec![
+                Command::new("format_json", "Formatear JSON (2 espacios)")
+                    .icon(IconName::Sparkles)
+                    .keys("secondary-shift-i"),
+                Command::new("validate_json", "Validar sintaxis JSON").icon(IconName::Check),
+                Command::new("apply_changes", "Aplicar edición a la comparación")
+                    .icon(IconName::Play),
+                Command::new("save_file", "Guardar cambios en disco")
+                    .icon(IconName::Save)
+                    .keys("secondary-s"),
+            ],
+        )
+        .group(
+            "Configuración y Preferencias",
+            vec![
+                Command::new("open_settings", "Abrir Configuración de la aplicación")
+                    .icon(IconName::Settings)
+                    .keys("secondary-,"),
+                Command::new("toggle_theme", "Alternar tema (Claro / Oscuro)")
+                    .icon(IconName::Sun)
+                    .keys("secondary-t"),
+            ],
+        )
+        .on_run({
+            let view = view.clone();
+            move |val, window, cx| {
+                view.update(cx, |this, cx| {
+                    this.run_command_action(val.as_ref(), window, cx);
+                });
+            }
+        })
+    }
+
+    /// Renderiza el modal de Configuración de la aplicación usando Dialog y componentes de Ely.
+    fn render_settings_dialog(
+        &self,
+        view: Entity<Self>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = cx.theme();
+        let colors = &theme.colors;
+        let shortcuts = Self::shortcuts_list();
+
+        let tab_content = match self.settings_tab {
+            SettingsTab::General => {
+                let current_diff_mode = self
+                    .comparison
+                    .as_ref()
+                    .map(|c| c.diff_mode)
+                    .unwrap_or(DiffMode::FixedBase);
+                let current_filter = if self.only_changed { "changed" } else { "all" };
+                let current_theme = if cx.theme().is_dark() { "dark" } else { "light" };
+
+                let view1 = view.clone();
+                let view2 = view.clone();
+                let view3 = view.clone();
+
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(
+                        SettingsSection::new("Apariencia y Visualización")
+                            .description("Personaliza el tema visual y la paleta de colores de Ely.")
+                            .row(
+                                SettingsRow::new("Tema de la interfaz")
+                                    .description("Alterna entre tema oscuro moderno o tema claro de alto contraste.")
+                                    .control(
+                                        SegmentedControl::new("settings_theme", current_theme)
+                                            .size(ControlSize::Sm)
+                                            .segment("dark", "Oscuro", Some(IconName::Moon))
+                                            .segment("light", "Claro", Some(IconName::Sun))
+                                            .on_change(move |val, _, cx| {
+                                                let mode = if val.as_ref() == "dark" {
+                                                    Mode::Dark
+                                                } else {
+                                                    Mode::Light
+                                                };
+                                                Theme::set_mode(mode, cx);
+                                            }),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        SettingsSection::new("Motor de Comparación")
+                            .description("Ajusta la estrategia de evaluación y filtros entre versiones de JSON.")
+                            .row(
+                                SettingsRow::new("Modo de comparación")
+                                    .description("Base fija compara contra el primer archivo; En cadena compara secuencialmente.")
+                                    .control(
+                                        SegmentedControl::new(
+                                            "settings_diff_mode",
+                                            match current_diff_mode {
+                                                DiffMode::FixedBase => "fixed",
+                                                DiffMode::Sequential => "seq",
+                                            },
+                                        )
+                                        .size(ControlSize::Sm)
+                                        .segment("fixed", "Base fija", Some(IconName::Pin))
+                                        .segment("seq", "En cadena", Some(IconName::ArrowRight))
+                                        .on_change(move |val, _, cx| {
+                                            let new_mode = if val.as_ref() == "seq" {
+                                                DiffMode::Sequential
+                                            } else {
+                                                DiffMode::FixedBase
+                                            };
+                                            view1.update(cx, |this, cx| {
+                                                if let Some(c) = &mut this.comparison {
+                                                    c.set_diff_mode(new_mode);
+                                                    this.refilter();
+                                                    cx.notify();
+                                                }
+                                            });
+                                        }),
+                                    ),
+                            )
+                            .row(
+                                SettingsRow::new("Filtro predeterminado")
+                                    .description("Mostrar solo filas con cambios o todas las propiedades.")
+                                    .control(
+                                        SegmentedControl::new("settings_filter", current_filter)
+                                            .size(ControlSize::Sm)
+                                            .segment("changed", "Solo cambios", Some(IconName::Filter))
+                                            .segment("all", "Todos", Some(IconName::ListChecks))
+                                            .on_change(move |val, _, cx| {
+                                                let is_changed = val.as_ref() == "changed";
+                                                view2.update(cx, |this, cx| {
+                                                    this.only_changed = is_changed;
+                                                    this.refilter();
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    ),
+                            )
+                            .row(
+                                SettingsRow::new("Selector de subestructura")
+                                    .description("Restablecer consulta JSONPath a la raíz '$' completa.")
+                                    .control(
+                                        Button::new("btn_reset_sel_settings", "Restaurar a raíz ($)")
+                                            .size(ControlSize::Sm)
+                                            .variant(ButtonVariant::Outline)
+                                            .icon(IconName::RotateCcw)
+                                            .on_click(move |_, _, cx| {
+                                                view3.update(cx, |this, cx| {
+                                                    this.reset_selector(cx);
+                                                });
+                                            }),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        SettingsSection::new("Capacidad y Soporte")
+                            .description("Límites del motor y características admitidas.")
+                            .row(
+                                SettingsRow::new("Límite de archivos")
+                                    .description("Comparación matricial de 2 a 10 archivos JSON simultáneos.")
+                                    .control(
+                                        Badge::new("2 - 10 archivos")
+                                            .tone(Tone::Info),
+                                    ),
+                            ),
+                    )
+                    .into_any_element()
+            }
+            SettingsTab::Shortcuts => {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(theme.text_size(TextSize::Sm))
+                            .text_color(colors.fg_muted)
+                            .child("Escribe para filtrar atajos por nombre, acción o combinación de teclas:"),
+                    )
+                    .child(
+                        div()
+                            .id("settings_shortcuts_scroll")
+                            .max_h(px(320.0))
+                            .overflow_y_scroll()
+                            .child(KeyboardShortcutsList::new(shortcuts, &self.settings_shortcuts_search)),
+                    )
+                    .into_any_element()
+            }
+        };
+
+        let view_tabs = view.clone();
+        Dialog::new("settings_dialog", "Configuración de la Aplicación", {
+            let view = view.clone();
+            move |_, cx| {
+                view.update(cx, |this, cx| {
+                    this.show_settings = false;
+                    cx.notify();
+                });
+            }
+        })
+        .detail("Preferencias visuales, modo de comparación y catálogo de atajos de teclado.")
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(
+                    SegmentedControl::new(
+                        "settings_tab_select",
+                        match self.settings_tab {
+                            SettingsTab::General => "general",
+                            SettingsTab::Shortcuts => "shortcuts",
+                        },
+                    )
+                    .size(ControlSize::Sm)
+                    .segment(
+                        "general",
+                        "General y Preferencias",
+                        Some(IconName::Settings),
+                    )
+                    .segment("shortcuts", "Atajos de Teclado", Some(IconName::Keyboard))
+                    .on_change(move |val, _, cx| {
+                        let tab = if val.as_ref() == "shortcuts" {
+                            SettingsTab::Shortcuts
+                        } else {
+                            SettingsTab::General
+                        };
+                        view_tabs.update(cx, |this, cx| {
+                            this.settings_tab = tab;
+                            cx.notify();
+                        });
+                    }),
+                )
+                .child(tab_content),
+        )
+        .action({
+            let view = view.clone();
+            move |close| {
+                Button::new("btn_done_settings", "Listo")
+                    .primary()
+                    .size(ControlSize::Sm)
+                    .on_click(move |_, window, cx| {
+                        close(window, cx);
+                        view.update(cx, |this, cx| {
+                            this.show_settings = false;
+                            cx.notify();
+                        });
+                    })
+            }
+        })
+    }
 }
 
 impl gpui::Render for DiffView {
@@ -708,6 +1379,26 @@ impl gpui::Render for DiffView {
                         },
                     )
                     .child(
+                        IconButton::new("cmd_palette_btn", IconName::Command)
+                            .size(ControlSize::Sm)
+                            .tooltip("Paleta de comandos (Ctrl+K)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_command_palette = !this.show_command_palette;
+                                this.show_settings = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        IconButton::new("settings_btn", IconName::Settings)
+                            .size(ControlSize::Sm)
+                            .tooltip("Configuración (Ctrl+,)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_settings = !this.show_settings;
+                                this.show_command_palette = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
                         IconButton::new(
                             "theme_toggle",
                             if cx.theme().is_dark() {
@@ -718,9 +1409,9 @@ impl gpui::Render for DiffView {
                         )
                         .size(ControlSize::Sm)
                         .tooltip(if cx.theme().is_dark() {
-                            "Modo claro"
+                            "Modo claro (Ctrl+T)"
                         } else {
-                            "Modo oscuro"
+                            "Modo oscuro (Ctrl+T)"
                         })
                         .on_click(move |_, _, cx| {
                             let next = if cx.theme().is_dark() {
@@ -1768,10 +2459,73 @@ impl gpui::Render for DiffView {
                                 ),
                         )
                         .child(
-                            Button::new("open_empty", "Abrir archivos…")
-                                .primary()
-                                .icon(IconName::FolderOpen)
-                                .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    Button::new("open_empty", "Abrir archivos…")
+                                        .primary()
+                                        .icon(IconName::FolderOpen)
+                                        .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
+                                )
+                                .child(
+                                    Button::new("cmd_empty", "Paleta de comandos")
+                                        .variant(ButtonVariant::Outline)
+                                        .icon(IconName::Command)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.show_command_palette = true;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("settings_empty", "Configuración")
+                                        .variant(ButtonVariant::Ghost)
+                                        .icon(IconName::Settings)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.show_settings = true;
+                                            cx.notify();
+                                        })),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap_4()
+                                .pt_2()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .text_size(theme.text_size(TextSize::Xs))
+                                        .text_color(colors.fg_muted)
+                                        .child("Paleta:")
+                                        .child(KbdCombo::new("secondary-k")),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .text_size(theme.text_size(TextSize::Xs))
+                                        .text_color(colors.fg_muted)
+                                        .child("Abrir:")
+                                        .child(KbdCombo::new("secondary-o")),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .text_size(theme.text_size(TextSize::Xs))
+                                        .text_color(colors.fg_muted)
+                                        .child("Ajustes:")
+                                        .child(KbdCombo::new("secondary-,")),
+                                ),
                         ),
                 )
                 .into_any_element()
@@ -1786,11 +2540,27 @@ impl gpui::Render for DiffView {
             .text_color(colors.fg)
             .text_sm()
             .font_family("monospace")
+            .track_focus(&self.focus_handle)
+            .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.handle_global_key(event, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                 this.set_paths(paths.paths().to_vec(), cx);
             }))
             .child(toolbar)
             .child(body)
+            .children(if self.show_command_palette {
+                Some(self.render_command_palette(view.clone()))
+            } else {
+                None
+            })
+            .children(if self.show_settings {
+                Some(self.render_settings_dialog(view.clone(), cx))
+            } else {
+                None
+            })
     }
 }
 
