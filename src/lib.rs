@@ -34,11 +34,68 @@ pub struct LoadedFile {
     pub content: String,
 }
 
+/// Tipo inferido de un valor JSON renderizado para visualización e inspección de diferencias.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonType {
+    String,
+    Number,
+    Boolean,
+    Null,
+    Array,
+    Object,
+    Other,
+}
+
+impl JsonType {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::String => "String",
+            Self::Number => "Number",
+            Self::Boolean => "Boolean",
+            Self::Null => "Null",
+            Self::Array => "Array",
+            Self::Object => "Object",
+            Self::Other => "Other",
+        }
+    }
+}
+
+/// Detecta el tipo semántico a partir del valor renderizado en formato JSON normalizado.
+pub fn detect_json_type(val: &str) -> JsonType {
+    let trimmed = val.trim();
+    if trimmed == "null" {
+        JsonType::Null
+    } else if trimmed == "true" || trimmed == "false" {
+        JsonType::Boolean
+    } else if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        JsonType::String
+    } else if trimmed == "{}" {
+        JsonType::Object
+    } else if trimmed == "[]" {
+        JsonType::Array
+    } else if trimmed.parse::<f64>().is_ok() {
+        JsonType::Number
+    } else {
+        JsonType::Other
+    }
+}
+
+/// Determina si dos valores renderizados representan tipos de datos diferentes.
+pub fn is_type_change(val_a: &str, val_b: &str) -> bool {
+    detect_json_type(val_a) != detect_json_type(val_b)
+}
+
 /// Celda de una fila: valor de una ruta en un archivo concreto.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
     pub line: usize,
     pub value: String,
+}
+
+impl Cell {
+    pub fn json_type(&self) -> JsonType {
+        detect_json_type(&self.value)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -542,5 +599,25 @@ mod tests {
         let file = load_file_from_str(Path::new("test.json"), raw).unwrap();
         assert_eq!(file.content, raw);
         assert_eq!(file.leaves.len(), 2);
+    }
+
+    #[test]
+    fn test_detect_json_type_and_type_change() {
+        assert_eq!(detect_json_type("\"hello\""), JsonType::String);
+        assert_eq!(detect_json_type("\"17\""), JsonType::String);
+        assert_eq!(detect_json_type("17"), JsonType::Number);
+        assert_eq!(detect_json_type("-3.14"), JsonType::Number);
+        assert_eq!(detect_json_type("true"), JsonType::Boolean);
+        assert_eq!(detect_json_type("false"), JsonType::Boolean);
+        assert_eq!(detect_json_type("null"), JsonType::Null);
+        assert_eq!(detect_json_type("{}"), JsonType::Object);
+        assert_eq!(detect_json_type("[]"), JsonType::Array);
+
+        // Type changes
+        assert!(is_type_change("\"17\"", "17"));
+        assert!(is_type_change("true", "\"true\""));
+        assert!(is_type_change("null", "\"\""));
+        assert!(!is_type_change("17", "18"));
+        assert!(!is_type_change("\"a\"", "\"b\""));
     }
 }

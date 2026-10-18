@@ -13,12 +13,13 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `load_file_from_str` parsea texto en memoria preservando el contenido original.
   - `format_json` indenta y normaliza JSON a 2 espacios.
   - `validate_json` comprueba la sintaxis JSON sin dependencias gráficas.
+  - `detect_json_type` y `is_type_change` clasifican tipos de datos y detectan mutaciones entre versiones (e.g. string vs número).
   - `compare_with_base` une rutas en orden de primera aparición y marca `Row.changed` respecto a la base seleccionada.
   - `matches_filter` filtra filas por ruta o valor.
   - `export_markdown` y `export_csv` generan reportes tabulares estructurados.
   - `text_report` alimenta el modo `--cli`.
 - `src/gui.rs`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Integra:
-  - Vista Tabla (Matriz virtualizada con `uniform_list`).
+  - Vista Tabla (Matriz virtualizada con `uniform_list`, celdas enriquecidas con `Badge`, gutter de líneas, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
   - Vista Diff Git (`DiffViewer` en modo Unified y Split con estadísticas `DiffStat`).
   - Vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
 - `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI.

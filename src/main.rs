@@ -47,7 +47,6 @@ fn main() {
 
     #[cfg(feature = "gui")]
     {
-        println!("Iniciando JSON Diff...");
         gui::run(paths);
     }
 }

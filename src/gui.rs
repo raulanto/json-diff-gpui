@@ -27,13 +27,14 @@ use gpui::{
     Window, WindowBounds, WindowOptions,
 };
 use jsondiff::{
-    compare_paths_with_base, compare_with_base, export_markdown, format_json, load_file_from_str,
-    matches_filter, validate_json, Comparison, MAX_FILES, MIN_FILES,
+    compare_paths_with_base, compare_with_base, detect_json_type, export_markdown, format_json,
+    is_type_change, load_file_from_str, matches_filter, validate_json, Comparison, JsonType,
+    MAX_FILES, MIN_FILES,
 };
 use std::ops::Range;
 use std::path::PathBuf;
 
-const ROW_H: f32 = 34.0;
+const ROW_H: f32 = 38.0;
 const PATH_W: f32 = 320.0;
 
 /// Modos de visualización integrados.
@@ -635,6 +636,7 @@ impl gpui::Render for DiffView {
                     let list_indices = visible_indices.clone();
                     let rows_data = c.rows.clone();
                     let files_count = c.files.len();
+                    let base_ix = c.base_index;
                     let list_view = view.clone();
 
                     let list = uniform_list(
@@ -649,6 +651,8 @@ impl gpui::Render for DiffView {
                                     let row_idx = list_indices[ix];
                                     let row = &rows_data[row_idx];
                                     let is_diff = row.changed;
+                                    let base_cell =
+                                        row.cells.get(base_ix).and_then(|c| c.as_ref());
 
                                     let mut row_el = div()
                                         .id(("row", row_idx))
@@ -660,15 +664,22 @@ impl gpui::Render for DiffView {
                                         .border_b_1()
                                         .border_color(colors.border.opacity(0.5))
                                         .bg(if is_diff {
-                                            colors.warning.opacity(0.06)
+                                            colors.warning.opacity(0.04)
                                         } else {
                                             colors.surface
                                         })
-                                        .hover(|s| s.bg(colors.hover));
+                                        .hover(|s| s.bg(colors.hover.opacity(0.5)));
 
                                     // Columna de ruta
                                     let path_str = row.path.clone();
                                     let copy_path = path_str.clone();
+
+                                    // Separar prefijo padre y clave hoja para mejor legibilidad
+                                    let (parent_path, leaf_name) = match path_str.rfind('.') {
+                                        Some(pos) => (&path_str[..=pos], &path_str[pos + 1..]),
+                                        None => ("", path_str.as_str()),
+                                    };
+
                                     let path_cell = div()
                                         .id(("path_cell", row_idx))
                                         .w(px(PATH_W))
@@ -693,53 +704,213 @@ impl gpui::Render for DiffView {
                                                 });
                                             }
                                         })
-                                        .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(
-                                            if is_diff {
-                                                colors.warning
-                                            } else {
-                                                colors.success
-                                            },
-                                        ))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .w(px(7.0))
+                                                .h(px(7.0))
+                                                .rounded_full()
+                                                .bg(if is_diff {
+                                                    colors.warning
+                                                } else {
+                                                    colors.success
+                                                }),
+                                        )
                                         .child(
                                             div()
                                                 .flex_1()
+                                                .min_w_0()
                                                 .overflow_hidden()
                                                 .whitespace_nowrap()
                                                 .text_ellipsis()
-                                                .font_weight(if is_diff {
-                                                    FontWeight::BOLD
-                                                } else {
-                                                    FontWeight::NORMAL
-                                                })
-                                                .text_color(if is_diff {
-                                                    colors.fg
-                                                } else {
-                                                    colors.fg_muted
-                                                })
-                                                .child(path_str),
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .child(
+                                                    div()
+                                                        .text_color(colors.fg_subtle)
+                                                        .text_size(theme.text_size(TextSize::Xs))
+                                                        .child(parent_path.to_string()),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .font_weight(if is_diff {
+                                                            FontWeight::BOLD
+                                                        } else {
+                                                            FontWeight::MEDIUM
+                                                        })
+                                                        .text_color(if is_diff {
+                                                            colors.fg
+                                                        } else {
+                                                            colors.fg_muted
+                                                        })
+                                                        .child(leaf_name.to_string()),
+                                                ),
                                         );
 
                                     row_el = row_el.child(path_cell);
 
                                     // Columnas de valores
                                     for file_col in 0..files_count {
-                                        let cell = row.cells.get(file_col).and_then(|c| c.as_ref());
+                                        let is_base = file_col == base_ix;
+                                        let cell =
+                                            row.cells.get(file_col).and_then(|c| c.as_ref());
+
                                         let cell_el = if let Some(c) = cell {
                                             let val_str = c.value.clone();
                                             let copy_val = val_str.clone();
                                             let line_info = format!("L{}", c.line);
 
-                                            div()
+                                            let jtype = detect_json_type(&val_str);
+                                            let (differs_from_base, type_changed, is_new_field) =
+                                                if is_base {
+                                                    (false, false, false)
+                                                } else {
+                                                    match base_cell {
+                                                        Some(b) => (
+                                                            b.value != c.value,
+                                                            is_type_change(&b.value, &c.value),
+                                                            false,
+                                                        ),
+                                                        None => (true, false, true),
+                                                    }
+                                                };
+
+                                            let tooltip_msg = if is_base {
+                                                format!("Base | L{}\nClic para copiar valor", c.line)
+                                            } else if is_new_field {
+                                                format!(
+                                                    "Nuevo campo (no existe en la base) | L{}\nClic para copiar valor",
+                                                    c.line
+                                                )
+                                            } else if type_changed {
+                                                format!(
+                                                    "Cambio de tipo vs base\nBase: {}\nActual: {}\nClic para copiar",
+                                                    base_cell.map(|b| b.value.as_str()).unwrap_or(""),
+                                                    val_str
+                                                )
+                                            } else if differs_from_base {
+                                                format!(
+                                                    "Difiere de la base\nBase: {}\nActual: {}\nClic para copiar",
+                                                    base_cell.map(|b| b.value.as_str()).unwrap_or(""),
+                                                    val_str
+                                                )
+                                            } else {
+                                                format!("Idéntico a la base | L{}\nClic para copiar", c.line)
+                                            };
+
+                                            let mut val_content = div()
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap_1p5()
+                                                .min_w_0()
+                                                .overflow_hidden();
+
+                                            if is_new_field {
+                                                val_content = val_content
+                                                    .child(Badge::new("+ Nuevo").tone(Tone::Success).dot());
+                                            }
+
+                                            if type_changed {
+                                                val_content = val_content
+                                                    .child(Badge::new("≠ Tipo").tone(Tone::Warning));
+                                            }
+
+                                            match jtype {
+                                                JsonType::Boolean => {
+                                                    let tone = if val_str == "true" {
+                                                        Tone::Success
+                                                    } else {
+                                                        Tone::Warning
+                                                    };
+                                                    val_content = val_content
+                                                        .child(Badge::new(val_str.clone()).tone(tone));
+                                                }
+                                                JsonType::Null => {
+                                                    val_content = val_content
+                                                        .child(Badge::new("null").tone(Tone::Neutral));
+                                                }
+                                                JsonType::Number => {
+                                                    val_content = val_content.child(
+                                                        div()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(if differs_from_base {
+                                                                colors.warning
+                                                            } else if is_base {
+                                                                colors.accent
+                                                            } else {
+                                                                colors.fg
+                                                            })
+                                                            .child(val_str.clone()),
+                                                    );
+                                                }
+                                                JsonType::String => {
+                                                    val_content = val_content.child(
+                                                        div()
+                                                            .overflow_hidden()
+                                                            .whitespace_nowrap()
+                                                            .text_ellipsis()
+                                                            .font_weight(if differs_from_base {
+                                                                FontWeight::MEDIUM
+                                                            } else {
+                                                                FontWeight::NORMAL
+                                                            })
+                                                            .text_color(if differs_from_base {
+                                                                colors.fg
+                                                            } else {
+                                                                colors.fg_muted
+                                                            })
+                                                            .child(val_str.clone()),
+                                                    );
+                                                }
+                                                JsonType::Array | JsonType::Object => {
+                                                    let tag = if jtype == JsonType::Array {
+                                                        "[]"
+                                                    } else {
+                                                        "{}"
+                                                    };
+                                                    val_content = val_content
+                                                        .child(Badge::new(tag).tone(Tone::Info))
+                                                        .child(
+                                                            div()
+                                                                .overflow_hidden()
+                                                                .whitespace_nowrap()
+                                                                .text_ellipsis()
+                                                                .text_color(colors.fg_muted)
+                                                                .child(val_str.clone()),
+                                                        );
+                                                }
+                                                JsonType::Other => {
+                                                    val_content = val_content.child(
+                                                        div()
+                                                            .overflow_hidden()
+                                                            .whitespace_nowrap()
+                                                            .text_ellipsis()
+                                                            .text_color(if differs_from_base {
+                                                                colors.fg
+                                                            } else {
+                                                                colors.fg_muted
+                                                            })
+                                                            .child(val_str.clone()),
+                                                    );
+                                                }
+                                            }
+
+                                            let mut cell_box = div()
                                                 .id(("val_cell", row_idx * 10 + file_col))
                                                 .flex_1()
                                                 .min_w_0()
-                                                .px_3()
+                                                .h(px(ROW_H - 6.0))
+                                                .mx_1()
+                                                .px_2()
                                                 .flex()
                                                 .flex_row()
                                                 .items_center()
                                                 .gap_2()
                                                 .cursor_pointer()
-                                                .tooltip(Tooltip::text("Clic para copiar valor"))
+                                                .rounded(theme.radius(Radius::Sm))
+                                                .tooltip(Tooltip::text(tooltip_msg))
                                                 .on_click({
                                                     let view = list_view.clone();
                                                     move |_, _, cx| {
@@ -750,39 +921,76 @@ impl gpui::Render for DiffView {
                                                         );
                                                         view.update(cx, |this, cx| {
                                                             this.show_toast(
-                                                                "Valor copiado al portapapeles",
+                                                                format!(
+                                                                    "Valor copiado: {}",
+                                                                    copy_val
+                                                                ),
                                                                 cx,
                                                             );
                                                         });
                                                     }
-                                                })
+                                                });
+
+                                            if differs_from_base {
+                                                cell_box = cell_box
+                                                    .bg(colors.warning.opacity(0.10))
+                                                    .border_1()
+                                                    .border_color(colors.warning.opacity(0.35));
+                                            } else if is_base {
+                                                cell_box = cell_box.bg(colors.sunken.opacity(0.30));
+                                            }
+
+                                            cell_box
                                                 .child(
                                                     div()
+                                                        .flex_none()
+                                                        .px_1p5()
+                                                        .py(px(1.0))
+                                                        .rounded(theme.radius(Radius::Sm))
+                                                        .bg(colors.sunken)
                                                         .text_size(theme.text_size(TextSize::Xs))
                                                         .text_color(colors.fg_subtle)
                                                         .child(line_info),
                                                 )
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .overflow_hidden()
-                                                        .whitespace_nowrap()
-                                                        .text_ellipsis()
-                                                        .text_color(if is_diff {
-                                                            colors.fg
-                                                        } else {
-                                                            colors.fg_muted
-                                                        })
-                                                        .child(val_str),
-                                                )
+                                                .child(val_content)
                                         } else {
-                                            div()
-                                                .id(("val_cell_empty", row_idx * 10 + file_col))
-                                                .flex_1()
-                                                .min_w_0()
-                                                .px_3()
-                                                .text_color(colors.fg_subtle)
-                                                .child("∅")
+                                            if base_cell.is_some() {
+                                                div()
+                                                    .id(("val_cell_empty", row_idx * 10 + file_col))
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .h(px(ROW_H - 6.0))
+                                                    .mx_1()
+                                                    .px_2()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .rounded(theme.radius(Radius::Sm))
+                                                    .bg(colors.danger.opacity(0.08))
+                                                    .border_1()
+                                                    .border_color(colors.danger.opacity(0.25))
+                                                    .tooltip(Tooltip::text(
+                                                        "Campo ausente en este archivo (presente en la base)",
+                                                    ))
+                                                    .child(
+                                                        Badge::new("Ausente")
+                                                            .tone(Tone::Danger)
+                                                            .dot(),
+                                                    )
+                                            } else {
+                                                div()
+                                                    .id(("val_cell_empty", row_idx * 10 + file_col))
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .h(px(ROW_H - 6.0))
+                                                    .mx_1()
+                                                    .px_2()
+                                                    .flex()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .tooltip(Tooltip::text("Campo ausente"))
+                                                    .child(Badge::new("∅").tone(Tone::Neutral))
+                                            }
                                         };
 
                                         row_el = row_el.child(cell_el);
