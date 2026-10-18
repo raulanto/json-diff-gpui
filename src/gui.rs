@@ -262,8 +262,41 @@ impl DiffView {
             prompt: Some(format!("Elige de {MIN_FILES} a {MAX_FILES} archivos JSON").into()),
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = rx.await {
-                this.update(cx, |this, cx| this.set_paths(paths, cx)).ok();
+            let res = rx.await;
+            if let Ok(Ok(Some(paths))) = res {
+                if !paths.is_empty() {
+                    this.update(cx, |this, cx| this.set_paths(paths, cx)).ok();
+                    return;
+                }
+            }
+
+            // Fallback con zenity en Linux si xdg-desktop-portal no está disponible o falla
+            #[cfg(target_os = "linux")]
+            {
+                let output = std::process::Command::new("zenity")
+                    .arg("--file-selection")
+                    .arg("--multiple")
+                    .arg("--separator=|")
+                    .arg("--file-filter=Archivos JSON (*.json) | *.json")
+                    .arg(format!(
+                        "--title=Elige de {MIN_FILES} a {MAX_FILES} archivos JSON"
+                    ))
+                    .output();
+
+                if let Ok(out) = output {
+                    if out.status.success() {
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        let paths: Vec<PathBuf> = stdout
+                            .trim()
+                            .split('|')
+                            .map(|s| PathBuf::from(s.trim()))
+                            .filter(|p| !p.as_os_str().is_empty())
+                            .collect();
+                        if !paths.is_empty() {
+                            this.update(cx, |this, cx| this.set_paths(paths, cx)).ok();
+                        }
+                    }
+                }
             }
         })
         .detach();
@@ -700,11 +733,13 @@ impl DiffView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let key = event.keystroke.key.as_str();
+        let raw_key = event.keystroke.key.as_str();
+        let key_lower = raw_key.to_lowercase();
+        let key = key_lower.as_str();
         let m = &event.keystroke.modifiers;
 
         // Escape cierra cualquier modal activo
-        if key == "escape" && !m.modified() {
+        if (key == "escape" || key == "esc") && !m.modified() {
             if self.show_command_palette {
                 self.show_command_palette = false;
                 cx.notify();
@@ -718,26 +753,47 @@ impl DiffView {
             return false;
         }
 
+        // Teclas de función directas (sin modificadores)
+        if !m.modified() {
+            if key == "f1" {
+                self.show_command_palette = !self.show_command_palette;
+                self.show_settings = false;
+                cx.notify();
+                return true;
+            }
+            if key == "f2" {
+                self.show_settings = !self.show_settings;
+                self.show_command_palette = false;
+                cx.notify();
+                return true;
+            }
+        }
+
         // Atajos primarios con Ctrl (Linux/Win) o Cmd (macOS)
-        if m.secondary() && !m.alt {
+        let is_ctrl = m.secondary() || m.control || m.platform;
+        if is_ctrl && !m.alt {
             if !m.shift {
                 match key {
+                    // Paleta de comandos: Ctrl+K o Ctrl+P
                     "k" | "p" => {
                         self.show_command_palette = !self.show_command_palette;
                         self.show_settings = false;
                         cx.notify();
                         return true;
                     }
-                    "," => {
+                    // Configuración: Ctrl+, (en Linux puede llegar como "," o "comma")
+                    "," | "comma" | "<" => {
                         self.show_settings = !self.show_settings;
                         self.show_command_palette = false;
                         cx.notify();
                         return true;
                     }
-                    "o" => {
+                    // Abrir archivos: Ctrl+O
+                    "o" | "open" => {
                         self.pick_files(cx);
                         return true;
                     }
+                    // Vistas: Ctrl+1, Ctrl+2, Ctrl+3
                     "1" => {
                         self.view_mode = ViewMode::Table;
                         self.editor = None;
@@ -756,6 +812,7 @@ impl DiffView {
                         cx.notify();
                         return true;
                     }
+                    // Alternar modo diff: Ctrl+M
                     "m" => {
                         if let Some(c) = &mut self.comparison {
                             let new_mode = match c.diff_mode {
@@ -776,6 +833,7 @@ impl DiffView {
                             return true;
                         }
                     }
+                    // Alternar tema: Ctrl+T
                     "t" => {
                         let next = if cx.theme().is_dark() {
                             Mode::Light
@@ -785,6 +843,7 @@ impl DiffView {
                         Theme::set_mode(next, cx);
                         return true;
                     }
+                    // Guardar en editor: Ctrl+S
                     "s" => {
                         if self.view_mode == ViewMode::Editor {
                             self.save_editor_to_disk(cx);
@@ -796,6 +855,21 @@ impl DiffView {
             } else {
                 // Combinaciones con Shift (Ctrl+Shift+...)
                 match key {
+                    // Paleta de comandos alternativa (estilo VS Code): Ctrl+Shift+P
+                    "p" => {
+                        self.show_command_palette = !self.show_command_palette;
+                        self.show_settings = false;
+                        cx.notify();
+                        return true;
+                    }
+                    // Configuración alternativa: Ctrl+Shift+,
+                    "," | "comma" | "<" => {
+                        self.show_settings = !self.show_settings;
+                        self.show_command_palette = false;
+                        cx.notify();
+                        return true;
+                    }
+                    // Filtrar solo cambios: Ctrl+Shift+C
                     "c" => {
                         self.only_changed = !self.only_changed;
                         self.refilter();
@@ -810,6 +884,7 @@ impl DiffView {
                         cx.notify();
                         return true;
                     }
+                    // Copiar reporte Markdown: Ctrl+Shift+M
                     "m" => {
                         if let Some(c) = &self.comparison {
                             let md = export_markdown(c, self.only_changed);
@@ -818,10 +893,12 @@ impl DiffView {
                             return true;
                         }
                     }
+                    // Limpiar archivos: Ctrl+Shift+L
                     "l" => {
                         self.clear_files(cx);
                         return true;
                     }
+                    // Formatear JSON: Ctrl+Shift+I o Ctrl+Shift+F
                     "i" | "f" => {
                         if self.view_mode == ViewMode::Editor {
                             self.format_editor_json(cx);
@@ -2476,6 +2553,7 @@ impl gpui::Render for DiffView {
                                         .icon(IconName::Command)
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.show_command_palette = true;
+                                            this.show_settings = false;
                                             cx.notify();
                                         })),
                                 )
@@ -2485,6 +2563,7 @@ impl gpui::Render for DiffView {
                                         .icon(IconName::Settings)
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.show_settings = true;
+                                            this.show_command_palette = false;
                                             cx.notify();
                                         })),
                                 ),
@@ -2524,7 +2603,8 @@ impl gpui::Render for DiffView {
                                         .text_size(theme.text_size(TextSize::Xs))
                                         .text_color(colors.fg_muted)
                                         .child("Ajustes:")
-                                        .child(KbdCombo::new("secondary-,")),
+                                        .child(KbdCombo::new("secondary-,"))
+                                        .child(div().text_xs().text_color(colors.fg_subtle).child("(o F2)")),
                                 ),
                         ),
                 )
@@ -2542,6 +2622,11 @@ impl gpui::Render for DiffView {
             .font_family("monospace")
             .track_focus(&self.focus_handle)
             .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.handle_global_key(event, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 if this.handle_global_key(event, window, cx) {
                     cx.stop_propagation();
                 }
