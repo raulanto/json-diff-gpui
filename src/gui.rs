@@ -58,6 +58,10 @@ pub struct DiffView {
     _search_sub: Subscription,
     visible: Vec<usize>,
 
+    // Selector JSONPath (ej. "$.data", "$")
+    selector_input: Entity<TextInput>,
+    _selector_sub: Subscription,
+
     // Estado para vista Diff Git
     git_target_idx: usize,
     git_layout: DiffLayout,
@@ -105,6 +109,25 @@ impl DiffView {
             }
         });
 
+        let selector_input =
+            cx.new(|cx| TextInput::new(window, cx).placeholder("Selector (ej. $.data, $)"));
+
+        let selector_sub =
+            cx.subscribe(
+                &selector_input,
+                |this, entity, event: &InputEvent, cx| match event {
+                    InputEvent::Changed => {
+                        let text = entity.read(cx).text().to_string();
+                        this.apply_selector(&text, false, cx);
+                    }
+                    InputEvent::Submit => {
+                        let text = entity.read(cx).text().to_string();
+                        this.apply_selector(&text, true, cx);
+                    }
+                    _ => {}
+                },
+            );
+
         let mut v = Self {
             paths,
             comparison: None,
@@ -115,6 +138,8 @@ impl DiffView {
             search_input,
             _search_sub: search_sub,
             visible: Vec::new(),
+            selector_input,
+            _selector_sub: selector_sub,
             git_target_idx: 1,
             git_layout: DiffLayout::Unified,
             git_open_stretches: Vec::new(),
@@ -240,6 +265,51 @@ impl DiffView {
         .detach();
     }
 
+    /// Aplica un selector JSON (ej. "$.data", "$.items[*].id", "$") reconstruyendo las filas.
+    fn apply_selector(&mut self, text: &str, is_submit: bool, cx: &mut Context<Self>) {
+        let selector_str = if text.trim().is_empty() {
+            "$"
+        } else {
+            text.trim()
+        };
+        let result = if let Some(c) = &mut self.comparison {
+            match c.set_selector(selector_str) {
+                Ok(()) => Ok((c.rows.len(), selector_str.to_string())),
+                Err(e) => Err(e),
+            }
+        } else {
+            return;
+        };
+
+        match result {
+            Ok((total, sel_name)) => {
+                self.refilter();
+                if is_submit || sel_name != "$" {
+                    let msg = if sel_name == "$" {
+                        "Estructura completa del JSON ($)".to_string()
+                    } else {
+                        format!("Estructura enfocada: '{}' ({} campos)", sel_name, total)
+                    };
+                    self.show_toast(msg, cx);
+                }
+                cx.notify();
+            }
+            Err(e) => {
+                if is_submit {
+                    self.show_toast(format!("Error en selector: {e}"), cx);
+                }
+            }
+        }
+    }
+
+    /// Restaura el selector a la raíz ("$") mostrando todo el documento.
+    fn reset_selector(&mut self, cx: &mut Context<Self>) {
+        self.selector_input.update(cx, |input, cx| {
+            input.set_text("$", cx);
+        });
+        self.apply_selector("$", true, cx);
+    }
+
     /// Inicializa o actualiza el editor para el archivo seleccionado.
     fn init_editor_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(c) = &self.comparison else {
@@ -321,8 +391,12 @@ impl DiffView {
                 let mut new_files = c.files.clone();
                 new_files[self.editor_file_idx] = loaded;
                 let base_idx = c.base_index;
+                let old_mode = c.diff_mode;
+                let old_selector = c.selector.clone();
                 match compare_with_base(new_files, base_idx) {
-                    Ok(new_comp) => {
+                    Ok(mut new_comp) => {
+                        new_comp.set_diff_mode(old_mode);
+                        let _ = new_comp.set_selector(&old_selector);
                         self.comparison = Some(new_comp);
                         self.refilter();
                         if self.editor_file_idx != base_idx {
@@ -443,6 +517,11 @@ impl gpui::Render for DiffView {
                         .as_ref()
                         .map(|c| c.diff_mode)
                         .unwrap_or_default();
+                    let current_selector = self
+                        .comparison
+                        .as_ref()
+                        .map(|c| c.selector.as_str())
+                        .unwrap_or("$");
 
                     bar.child(
                         SegmentedControl::new(
@@ -489,17 +568,20 @@ impl gpui::Render for DiffView {
                         .size(ControlSize::Sm)
                         .segment("changed", "Solo cambios", Some(IconName::Filter))
                         .segment("all", "Todos", Some(IconName::ListChecks))
-                        .on_change(move |value, _, cx| {
-                            let is_changed = value.as_ref() == "changed";
-                            view.update(cx, |this, cx| {
-                                this.only_changed = is_changed;
-                                this.refilter();
-                                cx.notify();
-                            });
+                        .on_change({
+                            let view = view.clone();
+                            move |value, _, cx| {
+                                let is_changed = value.as_ref() == "changed";
+                                view.update(cx, |this, cx| {
+                                    this.only_changed = is_changed;
+                                    this.refilter();
+                                    cx.notify();
+                                });
+                            }
                         }),
                     )
                     .child(
-                        div().w(px(220.0)).child(
+                        div().w(px(200.0)).child(
                             Input::new(&self.search_input)
                                 .size(ControlSize::Sm)
                                 .prefix(
@@ -510,6 +592,32 @@ impl gpui::Render for DiffView {
                                 .clearable(),
                         ),
                     )
+                    .child(
+                        div().w(px(200.0)).child(
+                            Input::new(&self.selector_input)
+                                .size(ControlSize::Sm)
+                                .prefix(
+                                    Icon::new(IconName::Braces)
+                                        .size(IconSize::Sm)
+                                        .color(colors.fg_subtle),
+                                )
+                                .clearable(),
+                        ),
+                    )
+                    .when(current_selector != "$", |el| {
+                        let view = view.clone();
+                        el.child(
+                            Button::new("reset_selector", "Restaurar $")
+                                .size(ControlSize::Sm)
+                                .variant(ButtonVariant::Ghost)
+                                .icon(IconName::RotateCcw)
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        this.reset_selector(cx);
+                                    });
+                                }),
+                        )
+                    })
                 },
             ))
             // Lado derecho: Notificaciones, badges de estado, exportación y tema
@@ -630,8 +738,20 @@ impl gpui::Render for DiffView {
                                 .w(px(PATH_W))
                                 .flex_none()
                                 .px_3()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("Campo / Ruta JSON"),
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Campo / Ruta JSON"),
+                                )
+                                .when(c.selector != "$", |el| {
+                                    el.child(
+                                        Badge::new(c.selector.clone()).tone(Tone::Accent).dot(),
+                                    )
+                                }),
                         );
 
                     for (i, f) in c.files.iter().enumerate() {
@@ -1193,17 +1313,42 @@ impl gpui::Render for DiffView {
                                         div()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(colors.fg)
-                                            .child(if self.only_changed {
+                                            .child(if c.rows.is_empty() {
+                                                format!(
+                                                    "El selector '{}' no coincidió con ningún campo en los archivos JSON.",
+                                                    c.selector
+                                                )
+                                            } else if self.only_changed {
                                                 if c.changed_count() == 0 {
-                                                    "¡Los archivos son idénticos! No hay diferencias."
+                                                    "¡Los archivos son idénticos! No hay diferencias en los campos seleccionados."
+                                                        .to_string()
                                                 } else {
                                                     "No hay diferencias que coincidan con la búsqueda."
+                                                        .to_string()
                                                 }
                                             } else {
                                                 "No se encontraron campos que coincidan con la búsqueda."
+                                                    .to_string()
                                             }),
                                     )
-                                    .when(self.only_changed, |el| {
+                                    .when(c.selector != "$", |el| {
+                                        let view = view.clone();
+                                        el.child(
+                                            Button::new(
+                                                "btn_reset_empty",
+                                                "Restaurar estructura completa ($)",
+                                            )
+                                            .size(ControlSize::Sm)
+                                            .variant(ButtonVariant::Primary)
+                                            .icon(IconName::RotateCcw)
+                                            .on_click(move |_, _, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    this.reset_selector(cx);
+                                                });
+                                            }),
+                                        )
+                                    })
+                                    .when(self.only_changed && !c.rows.is_empty(), |el| {
                                         let view = view.clone();
                                         el.child(
                                             Button::new("btn_show_all", "Ver todos los campos")

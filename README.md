@@ -10,6 +10,10 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
   - **Tabla (Matriz)**: compara de 2 a 10 archivos JSON a la vez con columnas independientes, rutas aplanadas y números de línea exactos.
   - **Diff Estilo Git (`DiffViewer`)**: visor unificado (`Unified`) o dividido (`Split` lado a lado) con estadísticas de cambios (`+agregados -eliminados`), resaltado de palabras y plegado de líneas idénticas.
   - **Editor en Vivo (`CodeEditor`)**: edición directa del JSON con resaltado de sintaxis, números de línea, marcas en el gutter respecto al archivo base, formateo automático (pretty-print con 2 espacios), validación sintáctica, aplicación de cambios en memoria al diff al instante y guardado en disco.
+- **Lenguaje selector de subestructuras (JSONPath)**:
+  - Permite acotar la comparación a campos o subárboles concretos: `$.data`, `$.user.profile`, `$.items[*]`, `$.items[*].id`, `$..id`, `$.data, $.meta`.
+  - Por defecto evalúa la raíz completa (`$`), pero puedes cambiar el selector dinámicamente desde la barra superior o pasar `-s|--selector` en la terminal.
+  - Botón de restauración rápida a `$` para alternar con un clic entre la vista enfocada y el documento completo.
 - **Modos de comparación flexibles**:
   - **Base fija**: todos los archivos se contrastan con un único archivo base seleccionado.
   - **En cadena (secuencial)**: cada archivo se compara contra el anterior (1 vs 0, 2 vs 1, 3 vs 2...), ideal para ver la evolución paso a paso de múltiples versiones.
@@ -29,12 +33,14 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
 # Ventana vacía; elige los archivos con «Abrir archivos…» o arrástralos
 cargo run --release
 
-# Archivos por argumento (2 a 6)
+# Archivos por argumento (2 a 10)
 cargo run --release -- a.json b.json c.json
 
 # Solo terminal
 cargo run --release -- --cli a.json b.json
 cargo run --release -- --cli --all a.json b.json   # incluye campos sin cambios
+cargo run --release -- --cli -s "$.data" a.json b.json  # enfocar en la subestructura data
+cargo run --release -- --cli -s "$.items[*].id" a.json b.json  # enfocar en IDs de items
 ```
 
 Ejemplo de salida `--cli`:

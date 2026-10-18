@@ -85,6 +85,318 @@ pub fn is_type_change(val_a: &str, val_b: &str) -> bool {
     detect_json_type(val_a) != detect_json_type(val_b)
 }
 
+/// Segmento de una ruta o patrón de consulta JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathSegment {
+    /// Nombre de clave de objeto (p. ej. "data", "user", "name").
+    Field(String),
+    /// Índice numérico de array (p. ej. "[0]", "[1]").
+    Index(usize),
+    /// Comodín de nivel único: "*" o "[*]" (coincide con cualquier campo o índice).
+    Wildcard,
+    /// Descenso recursivo: "**" o ".." (coincide con 0 o más niveles en cualquier profundidad).
+    Recursive,
+}
+
+/// Patrón individual compilado de una consulta (ej. "$.data.items[*].id").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectorPattern {
+    pub segments: Vec<PathSegment>,
+}
+
+impl SelectorPattern {
+    pub fn matches(&self, target: &[PathSegment]) -> bool {
+        match_pattern_segments(&self.segments, target)
+    }
+}
+
+/// Selector / extractor de estructuras JSON (estilo JSONPath).
+///
+/// Permite acotar la comparación a subárboles concretos de los documentos JSON.
+///
+/// Sintaxis soportada:
+/// - `"$"` o vacío `""`: selecciona todo el documento JSON (comportamiento por defecto).
+/// - `"$.data"` o `"data"`: enfoca la comparación en el objeto/subárbol `data`.
+/// - `"$.data.user"`: navegación por propiedades anidadas.
+/// - `"$.items[0]"`: acceso por índice a un elemento específico del array.
+/// - `"$.items[*]"`: comodín para cualquier elemento del array.
+/// - `"$.items[*].id"`: campo `id` en cualquiera de los elementos de `items`.
+/// - `"$.*.name"`: propiedad `name` en cualquier objeto de primer nivel.
+/// - `"$.**.id"` o `"$..id"`: búsqueda recursiva de campos `id` en cualquier nivel.
+/// - `"$.data, $.meta"`: unión de múltiples selectores separados por comas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsonSelector {
+    /// Expresión original ingresada por el usuario (e.g. "$.data").
+    pub raw: String,
+    /// Patrones compilados.
+    pub patterns: Vec<SelectorPattern>,
+}
+
+impl JsonSelector {
+    /// Crea el selector raíz por defecto ("$"), que selecciona todo el documento.
+    pub fn root() -> Self {
+        Self {
+            raw: "$".to_string(),
+            patterns: vec![SelectorPattern {
+                segments: Vec::new(),
+            }],
+        }
+    }
+
+    /// Comprueba si el selector actual corresponde a la raíz ("$").
+    pub fn is_root(&self) -> bool {
+        self.raw == "$"
+            || self.patterns.is_empty()
+            || (self.patterns.len() == 1 && self.patterns[0].segments.is_empty())
+    }
+
+    /// Parsea una cadena de consulta.
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() || trimmed == "$" {
+            return Ok(Self::root());
+        }
+
+        let mut patterns = Vec::new();
+        for part in trimmed.split(',') {
+            let p_trim = part.trim();
+            if p_trim.is_empty() {
+                continue;
+            }
+            let pattern = parse_single_pattern(p_trim)?;
+            patterns.push(pattern);
+        }
+
+        if patterns.is_empty() {
+            return Ok(Self::root());
+        }
+
+        Ok(Self {
+            raw: trimmed.to_string(),
+            patterns,
+        })
+    }
+
+    /// Evalúa si una ruta de hoja (ej. "data.user.name", "items[0].id") coincide con el selector.
+    pub fn matches(&self, path: &str) -> bool {
+        if self.is_root() {
+            return true;
+        }
+        let segments = parse_concrete_path(path);
+        self.patterns.iter().any(|p| p.matches(&segments))
+    }
+}
+
+impl std::fmt::Display for JsonSelector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.raw)
+    }
+}
+
+/// Descompone una ruta concreta generada durante el aplanado en segmentos.
+pub fn parse_concrete_path(path: &str) -> Vec<PathSegment> {
+    let clean = path.trim();
+    if clean.is_empty() || clean == "$" {
+        return vec![PathSegment::Field("$".to_string())];
+    }
+    let mut segments = Vec::new();
+    let mut chars = clean.chars().peekable();
+    let mut acc = String::new();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '.' => {
+                if !acc.is_empty() {
+                    segments.push(PathSegment::Field(std::mem::take(&mut acc)));
+                }
+            }
+            '[' => {
+                if !acc.is_empty() {
+                    segments.push(PathSegment::Field(std::mem::take(&mut acc)));
+                }
+                let mut bracket_content = String::new();
+                for inner in chars.by_ref() {
+                    if inner == ']' {
+                        break;
+                    }
+                    bracket_content.push(inner);
+                }
+                let inner_trim = bracket_content.trim();
+                if let Ok(idx) = inner_trim.parse::<usize>() {
+                    segments.push(PathSegment::Index(idx));
+                } else if inner_trim == "*" {
+                    segments.push(PathSegment::Wildcard);
+                } else {
+                    let cleaned = inner_trim.trim_matches(|c| c == '\'' || c == '"');
+                    segments.push(PathSegment::Field(cleaned.to_string()));
+                }
+            }
+            _ => {
+                acc.push(ch);
+            }
+        }
+    }
+    if !acc.is_empty() {
+        segments.push(PathSegment::Field(acc));
+    }
+    segments
+}
+
+/// Parsea un patrón individual (ej. "$.data.items[*].id" o "$..id").
+pub fn parse_single_pattern(pattern_str: &str) -> Result<SelectorPattern, String> {
+    let mut s = pattern_str.trim();
+    if let Some(rest) = s.strip_prefix('$') {
+        s = rest;
+    }
+    if let Some(rest) = s.strip_prefix('/') {
+        s = rest;
+    }
+
+    if s.is_empty() {
+        return Ok(SelectorPattern {
+            segments: Vec::new(),
+        });
+    }
+
+    if s.starts_with("..") {
+        // Descenso recursivo desde la raíz
+    } else if let Some(rest) = s.strip_prefix('.') {
+        s = rest;
+    }
+
+    let mut segments = Vec::new();
+    let mut chars = s.chars().peekable();
+    let mut acc = String::new();
+
+    let push_acc = |acc: &mut String, segments: &mut Vec<PathSegment>| {
+        if !acc.is_empty() {
+            if acc == "*" {
+                segments.push(PathSegment::Wildcard);
+            } else if acc == "**" {
+                if !matches!(segments.last(), Some(PathSegment::Recursive)) {
+                    segments.push(PathSegment::Recursive);
+                }
+            } else {
+                segments.push(PathSegment::Field(std::mem::take(acc)));
+            }
+            acc.clear();
+        }
+    };
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '.' => {
+                if chars.peek() == Some(&'.') {
+                    chars.next(); // consumir el segundo '.'
+                    push_acc(&mut acc, &mut segments);
+                    if !matches!(segments.last(), Some(PathSegment::Recursive)) {
+                        segments.push(PathSegment::Recursive);
+                    }
+                } else {
+                    push_acc(&mut acc, &mut segments);
+                }
+            }
+            '[' => {
+                push_acc(&mut acc, &mut segments);
+                let mut bracket_content = String::new();
+                let mut closed = false;
+                for inner in chars.by_ref() {
+                    if inner == ']' {
+                        closed = true;
+                        break;
+                    }
+                    bracket_content.push(inner);
+                }
+                if !closed {
+                    return Err(format!(
+                        "Corchete '[' sin cerrar en el selector: '{pattern_str}'"
+                    ));
+                }
+                let inner_trim = bracket_content.trim();
+                if inner_trim.is_empty() {
+                    return Err(format!("Índice vacío '[]' en el selector: '{pattern_str}'"));
+                }
+                if inner_trim == "*" {
+                    segments.push(PathSegment::Wildcard);
+                } else if inner_trim == "**" {
+                    if !matches!(segments.last(), Some(PathSegment::Recursive)) {
+                        segments.push(PathSegment::Recursive);
+                    }
+                } else if let Ok(idx) = inner_trim.parse::<usize>() {
+                    segments.push(PathSegment::Index(idx));
+                } else {
+                    let cleaned = inner_trim.trim_matches(|c| c == '\'' || c == '"');
+                    segments.push(PathSegment::Field(cleaned.to_string()));
+                }
+            }
+            _ => {
+                acc.push(ch);
+            }
+        }
+    }
+    push_acc(&mut acc, &mut segments);
+
+    Ok(SelectorPattern { segments })
+}
+
+/// Compara recursivamente los segmentos del patrón contra la ruta objetivo.
+fn match_pattern_segments(pattern: &[PathSegment], target: &[PathSegment]) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+
+    match &pattern[0] {
+        PathSegment::Recursive => {
+            let rest = &pattern[1..];
+            if rest.is_empty() {
+                return true;
+            }
+            for i in 0..=target.len() {
+                if match_pattern_segments(rest, &target[i..]) {
+                    return true;
+                }
+            }
+            false
+        }
+        PathSegment::Wildcard => {
+            if target.is_empty() {
+                return false;
+            }
+            match_pattern_segments(&pattern[1..], &target[1..])
+        }
+        PathSegment::Field(p_field) => {
+            if target.is_empty() {
+                return false;
+            }
+            match &target[0] {
+                PathSegment::Field(t_field) => {
+                    if p_field.eq_ignore_ascii_case(t_field) {
+                        match_pattern_segments(&pattern[1..], &target[1..])
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            }
+        }
+        PathSegment::Index(p_idx) => {
+            if target.is_empty() {
+                return false;
+            }
+            match &target[0] {
+                PathSegment::Index(t_idx) => {
+                    if p_idx == t_idx {
+                        match_pattern_segments(&pattern[1..], &target[1..])
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            }
+        }
+    }
+}
+
 /// Celda de una fila: valor de una ruta en un archivo concreto.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
@@ -122,11 +434,71 @@ pub struct Comparison {
     pub rows: Vec<Row>,
     pub base_index: usize,
     pub diff_mode: DiffMode,
+    pub selector: String,
 }
 
 impl Comparison {
     pub fn changed_count(&self) -> usize {
         self.rows.iter().filter(|r| r.changed).count()
+    }
+
+    pub fn selector(&self) -> &str {
+        &self.selector
+    }
+
+    /// Aplica un selector JSONPath (ej. "$.data", "$.items[*].id", "$") y reconstruye las filas.
+    pub fn set_selector(&mut self, selector_str: &str) -> Result<(), String> {
+        let sel = JsonSelector::parse(selector_str)?;
+        self.selector = if selector_str.trim().is_empty() {
+            "$".to_string()
+        } else {
+            selector_str.trim().to_string()
+        };
+        self.rebuild_rows_with_selector(&sel);
+        Ok(())
+    }
+
+    /// Reconstruye las filas de comparación filtrando las hojas según el selector provisto.
+    pub fn rebuild_rows_with_selector(&mut self, selector: &JsonSelector) {
+        let mut order: Vec<String> = Vec::new();
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        let mut per_file: Vec<HashMap<&str, &Leaf>> = Vec::new();
+
+        for f in &self.files {
+            let mut m = HashMap::new();
+            for leaf in &f.leaves {
+                if selector.matches(&leaf.path) {
+                    if !seen.contains_key(&leaf.path) {
+                        seen.insert(leaf.path.clone(), order.len());
+                        order.push(leaf.path.clone());
+                    }
+                    m.insert(leaf.path.as_str(), leaf);
+                }
+            }
+            per_file.push(m);
+        }
+
+        self.rows = order
+            .into_iter()
+            .map(|path| {
+                let cells: Vec<Option<Cell>> = per_file
+                    .iter()
+                    .map(|m| {
+                        m.get(path.as_str()).map(|l| Cell {
+                            line: l.line,
+                            value: l.value.clone(),
+                        })
+                    })
+                    .collect();
+                Row {
+                    path,
+                    cells,
+                    changed: false,
+                }
+            })
+            .collect();
+
+        self.recompute_changes();
     }
 
     pub fn set_diff_mode(&mut self, mode: DiffMode) {
@@ -423,6 +795,7 @@ pub fn compare_with_base(files: Vec<LoadedFile>, base_index: usize) -> Result<Co
         rows,
         base_index,
         diff_mode: DiffMode::FixedBase,
+        selector: "$".to_string(),
     })
 }
 
@@ -489,6 +862,9 @@ pub fn text_report(c: &Comparison, only_changed: bool) -> String {
         }
         out.push('\n');
     }
+    if c.selector != "$" {
+        out.push_str(&format!("Selector: {}\n", c.selector));
+    }
     out.push_str(&format!(
         "\n{} de {} campos con diferencias ({})\n\n",
         c.changed_count(),
@@ -520,6 +896,9 @@ pub fn text_report(c: &Comparison, only_changed: bool) -> String {
 pub fn export_markdown(c: &Comparison, only_changed: bool) -> String {
     let mut out = String::new();
     out.push_str("# Reporte de Diferencias JSON\n\n");
+    if c.selector != "$" {
+        out.push_str(&format!("**Selector de estructura:** `{}`\n\n", c.selector));
+    }
     match c.diff_mode {
         DiffMode::FixedBase => {
             out.push_str(&format!(
@@ -831,5 +1210,110 @@ mod tests {
         assert!(is_type_change("null", "\"\""));
         assert!(!is_type_change("17", "18"));
         assert!(!is_type_change("\"a\"", "\"b\""));
+    }
+
+    #[test]
+    fn test_json_selector_root() {
+        let sel_root = JsonSelector::parse("$").unwrap();
+        assert!(sel_root.is_root());
+        assert!(sel_root.matches("data"));
+        assert!(sel_root.matches("data.user.name"));
+        assert!(sel_root.matches("items[0].id"));
+        assert!(sel_root.matches("$"));
+
+        let sel_empty = JsonSelector::parse("").unwrap();
+        assert!(sel_empty.is_root());
+        assert!(sel_empty.matches("anything"));
+    }
+
+    #[test]
+    fn test_json_selector_subfields() {
+        let sel = JsonSelector::parse("$.data").unwrap();
+        assert!(sel.matches("data"));
+        assert!(sel.matches("data.name"));
+        assert!(sel.matches("data.user.email"));
+        assert!(sel.matches("data.items[0]"));
+        // No debe coincidir con campos fuera de data
+        assert!(!sel.matches("metadata"));
+        assert!(!sel.matches("database"));
+        assert!(!sel.matches("other.data"));
+    }
+
+    #[test]
+    fn test_json_selector_array_and_wildcard() {
+        let sel_idx = JsonSelector::parse("$.items[0]").unwrap();
+        assert!(sel_idx.matches("items[0]"));
+        assert!(sel_idx.matches("items[0].id"));
+        assert!(!sel_idx.matches("items[1].id"));
+
+        let sel_wild = JsonSelector::parse("$.items[*]").unwrap();
+        assert!(sel_wild.matches("items[0].id"));
+        assert!(sel_wild.matches("items[1].name"));
+        assert!(sel_wild.matches("items[99].status"));
+        assert!(!sel_wild.matches("users[0].id"));
+
+        let sel_wild_field = JsonSelector::parse("$.items[*].id").unwrap();
+        assert!(sel_wild_field.matches("items[0].id"));
+        assert!(sel_wild_field.matches("items[5].id"));
+        assert!(!sel_wild_field.matches("items[0].name"));
+    }
+
+    #[test]
+    fn test_json_selector_recursive() {
+        let sel_rec = JsonSelector::parse("$..id").unwrap();
+        assert!(sel_rec.matches("id"));
+        assert!(sel_rec.matches("user.id"));
+        assert!(sel_rec.matches("items[0].id"));
+        assert!(sel_rec.matches("data.dept.team.leader.id"));
+        assert!(!sel_rec.matches("user.name"));
+
+        let sel_rec_stars = JsonSelector::parse("$.**.id").unwrap();
+        assert!(sel_rec_stars.matches("user.id"));
+        assert!(sel_rec_stars.matches("items[0].id"));
+    }
+
+    #[test]
+    fn test_json_selector_multiple_union() {
+        let sel = JsonSelector::parse("$.data, $.meta").unwrap();
+        assert!(sel.matches("data.user"));
+        assert!(sel.matches("meta.version"));
+        assert!(!sel.matches("logs[0]"));
+    }
+
+    #[test]
+    fn test_json_selector_syntax_errors() {
+        assert!(JsonSelector::parse("$.items[").is_err());
+        assert!(JsonSelector::parse("$.items[]").is_err());
+    }
+
+    #[test]
+    fn test_comparison_set_selector() {
+        let a = load(r#"{"data":{"a":1,"b":2},"meta":{"version":1}}"#, "a");
+        let b = load(r#"{"data":{"a":1,"b":3},"meta":{"version":2}}"#, "b");
+        let mut comp = compare(vec![a, b]).unwrap();
+
+        // Por defecto ($) están las 3 rutas
+        assert_eq!(comp.rows.len(), 3);
+        assert_eq!(comp.selector, "$");
+        assert_eq!(comp.changed_count(), 2); // b y meta.version
+
+        // Enfocamos en $.data: solo quedan data.a y data.b
+        comp.set_selector("$.data").unwrap();
+        assert_eq!(comp.selector, "$.data");
+        assert_eq!(comp.rows.len(), 2);
+        assert_eq!(comp.rows[0].path, "data.a");
+        assert_eq!(comp.rows[1].path, "data.b");
+        assert_eq!(comp.changed_count(), 1); // solo data.b cambió
+
+        // Enfocamos en subcampo exacto $.data.b
+        comp.set_selector("$.data.b").unwrap();
+        assert_eq!(comp.rows.len(), 1);
+        assert_eq!(comp.rows[0].path, "data.b");
+        assert!(comp.rows[0].changed);
+
+        // Restaurar a raíz ($)
+        comp.set_selector("$").unwrap();
+        assert_eq!(comp.rows.len(), 3);
+        assert_eq!(comp.changed_count(), 2);
     }
 }

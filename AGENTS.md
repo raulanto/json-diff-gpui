@@ -14,15 +14,16 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `format_json` indenta y normaliza JSON a 2 espacios.
   - `validate_json` comprueba la sintaxis JSON sin dependencias gráficas.
   - `detect_json_type` y `is_type_change` clasifican tipos de datos y detectan mutaciones entre versiones (e.g. string vs número).
+  - `JsonSelector`, `PathSegment`, `SelectorPattern`: lenguaje extractor estilo JSONPath (`$`, `$.data`, `$.items[*]`, `$.items[*].id`, `$..id`, `$.data, $.meta`) para acotar la comparación a subestructuras específicas.
   - `compare_with_base` une rutas en orden de primera aparición y marca `Row.changed` respecto a la base seleccionada.
   - `matches_filter` filtra filas por ruta o valor.
   - `export_markdown` y `export_csv` generan reportes tabulares estructurados.
   - `text_report` alimenta el modo `--cli`.
 - `src/gui.rs`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Integra:
-  - Vista Tabla (Matriz virtualizada con `uniform_list`, celdas enriquecidas con `Badge`, gutter de líneas, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
+  - Vista Tabla (Matriz virtualizada con `uniform_list`, selector de estructura JSONPath reactivo con botón de restauración a `$`, celdas enriquecidas con `Badge`, gutter de líneas, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
   - Vista Diff Git (`DiffViewer` en modo Unified y Split con estadísticas `DiffStat`).
   - Vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
-- `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI.
+- `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI (soporta `-s|--selector <QUERY>`).
 
 Regla: cualquier cambio de comportamiento se implementa en `lib.rs` con prueba; la UI solo lo consume.
 
@@ -32,6 +33,7 @@ Regla: cualquier cambio de comportamiento se implementa en `lib.rs` con prueba; 
 ```bash
 cargo test --no-default-features      # pruebas del núcleo (rápido, sin GPUI)
 cargo run --no-default-features -- --cli a.json b.json
+cargo run --no-default-features -- --cli -s "$.data" a.json b.json
 cargo check                           # type-check incluida la UI
 cargo run --release                   # abre la ventana
 ```
@@ -45,6 +47,7 @@ cargo run --release                   # abre la ventana
 - Límites: `MIN_FILES = 2`, `MAX_FILES = 10` (en `lib.rs`; la UI los importa).
 - Soporta modos de comparación: `DiffMode::FixedBase` (contra archivo base único) y `DiffMode::Sequential` (en cadena: col 1 vs col 0, col 2 vs col 1, col 3 vs col 2...).
 - Reordenamiento interactivo de columnas con `move_file` / `swap_files` directamente en la UI.
+- Selector interactivo de subestructuras (`JsonSelector`): por defecto `$` (raíz completa), pero configurable dinámicamente (`$.data`, `$.items[*].id`, etc.).
 - La base de la comparación puede seleccionarse dinámicamente en modo base fija.
 
 ## Dependencias GPUI y Ely
@@ -65,4 +68,5 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 - [x] Buscar por nombre de campo o valor (implementado con `SearchInput`/`Input` en `gui.rs` y `matches_filter` en `lib.rs`).
 - [x] Exportar el reporte a Markdown/CSV (implementado en `lib.rs` con botón de copia en la UI).
 - [x] Comparación en cadena secuencial (1 vs 0, 2 vs 1, 3 vs 2...) y reordenamiento de archivos (hasta 10 JSON).
+- [x] Lenguaje selector JSONPath (`$.data`, `$.items[*]`, `$..id`, unión `,`) para extraer y enfocar subestructuras concretas.
 - [ ] Comparar arreglos por clave (p. ej. por `id`) en vez de por índice.
