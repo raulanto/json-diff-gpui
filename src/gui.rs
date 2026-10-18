@@ -249,6 +249,36 @@ impl DiffView {
         }
     }
 
+    /// Limpia todos los archivos JSON cargados y regresa a la pantalla inicial.
+    fn clear_files(&mut self, cx: &mut Context<Self>) {
+        self.paths.clear();
+        self.search_query.clear();
+        self.search_input.update(cx, |input, cx| {
+            input.set_text("", cx);
+        });
+        self.selector_input.update(cx, |input, cx| {
+            input.set_text("$", cx);
+        });
+        self.reload();
+        self.show_toast("Archivos limpiados", cx);
+        cx.notify();
+    }
+
+    /// Quita un archivo específico de la comparación (si hay más del mínimo requerido).
+    fn remove_file(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx >= self.paths.len() || self.paths.len() <= MIN_FILES {
+            return;
+        }
+        let file_name = self.paths[idx]
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("Archivo {}", idx + 1));
+        self.paths.remove(idx);
+        self.reload();
+        self.show_toast(format!("'{}' quitado de la comparación", file_name), cx);
+        cx.notify();
+    }
+
     fn show_toast(&mut self, msg: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.status_toast = Some(msg.into());
         cx.notify();
@@ -477,6 +507,15 @@ impl gpui::Render for DiffView {
                             .icon(IconName::FolderOpen)
                             .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
                     )
+                    .when(!self.paths.is_empty(), |bar| {
+                        bar.child(
+                            Button::new("clear_files", "Limpiar")
+                                .size(ControlSize::Sm)
+                                .variant(ButtonVariant::Outline)
+                                .icon(IconName::Trash2)
+                                .on_click(cx.listener(|this, _, _, cx| this.clear_files(cx))),
+                        )
+                    })
                     .when(self.comparison.is_some(), |bar| {
                         let view = view.clone();
                         bar.child(
@@ -713,6 +752,13 @@ impl gpui::Render for DiffView {
                         .text_color(colors.danger)
                         .child(err.clone()),
                 )
+                .child(
+                    Button::new("btn_clear_error", "Limpiar y volver a empezar")
+                        .size(ControlSize::Sm)
+                        .variant(ButtonVariant::Outline)
+                        .icon(IconName::RotateCcw)
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_files(cx))),
+                )
                 .into_any_element()
         } else if let Some(c) = &self.comparison {
             match self.view_mode {
@@ -795,6 +841,20 @@ impl gpui::Render for DiffView {
                                     .on_click(move |_, _, cx| {
                                         view.update(cx, |this, cx| {
                                             this.move_file(i, i + 1, cx);
+                                        });
+                                    }),
+                            );
+                        }
+
+                        if files_count > MIN_FILES {
+                            let view = view.clone();
+                            move_controls = move_controls.child(
+                                IconButton::new(("remove_file", i), IconName::X)
+                                    .size(ControlSize::Sm)
+                                    .tooltip("Quitar este archivo de la comparación")
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.remove_file(i, cx);
                                         });
                                     }),
                             );
@@ -1703,7 +1763,7 @@ impl gpui::Render for DiffView {
                                 .text_color(colors.fg_muted)
                                 .text_center()
                                 .child(
-                                    "Arrastra de 2 a 6 archivos JSON a esta ventana o utiliza el botón para seleccionarlos del disco.\n\
+                                    "Arrastra de 2 a 10 archivos JSON a esta ventana o utiliza el botón para seleccionarlos del disco.\n\
                                      Incluye vista matricial, comparador de cambios estilo Git y editor de código en vivo.",
                                 ),
                         )

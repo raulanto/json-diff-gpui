@@ -21,6 +21,7 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
 - **Selector de archivo base dinámico**: cambia el archivo base con un clic en «Hacer base» en la columna que desees o selecciónalo para contrastar en el Diff Git.
 - **Búsqueda en tiempo real**: filtra campos o valores al instante mediante el campo de búsqueda integrado en la tabla.
 - **Copiar al portapapeles y exportar**: copia la ruta del campo o valores individuales al portapapeles, o exporta el reporte tabular a Markdown.
+- **Limpieza y remoción de archivos**: botón «Limpiar» en la barra superior para descargar todos los archivos y volver a la pantalla de bienvenida; botones individuales (`✕`) en cada columna para descartar archivos específicos cuando hay más de 2; y botón de reinicio en estados de error.
 - **Tema claro / oscuro**: alterna entre modos visuales usando el sistema de temas de Ely Components.
 - Interruptor **solo cambios / todo** mediante control segmentado.
 - Abrir archivos con el diálogo del sistema o **arrastrándolos** a la ventana.
