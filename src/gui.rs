@@ -28,8 +28,8 @@ use gpui::{
 };
 use jsondiff::{
     compare_paths_with_base, compare_with_base, detect_json_type, export_markdown, format_json,
-    is_type_change, load_file_from_str, matches_filter, validate_json, Comparison, JsonType,
-    MAX_FILES, MIN_FILES,
+    is_type_change, load_file_from_str, matches_filter, validate_json, Comparison, DiffMode,
+    JsonType, MAX_FILES, MIN_FILES,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -190,7 +190,7 @@ impl DiffView {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Elige de 2 a 6 archivos JSON".into()),
+            prompt: Some(format!("Elige de {MIN_FILES} a {MAX_FILES} archivos JSON").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
@@ -198,6 +198,30 @@ impl DiffView {
             }
         })
         .detach();
+    }
+
+    fn move_file(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from == to || from >= self.paths.len() || to >= self.paths.len() {
+            return;
+        }
+        let file_name = self.paths[from]
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("Archivo {}", from + 1));
+
+        let p = self.paths.remove(from);
+        self.paths.insert(to, p);
+
+        if let Some(c) = &mut self.comparison {
+            if c.move_file(from, to).is_ok() {
+                self.refilter();
+                self.show_toast(
+                    format!("'{}' movido a la posición [{}]", file_name, to + 1),
+                    cx,
+                );
+                cx.notify();
+            }
+        }
     }
 
     fn show_toast(&mut self, msg: impl Into<SharedString>, cx: &mut Context<Self>) {
@@ -414,7 +438,50 @@ impl gpui::Render for DiffView {
                 self.view_mode == ViewMode::Table && self.comparison.is_some(),
                 |bar| {
                     let view = view.clone();
+                    let current_diff_mode = self
+                        .comparison
+                        .as_ref()
+                        .map(|c| c.diff_mode)
+                        .unwrap_or_default();
+
                     bar.child(
+                        SegmentedControl::new(
+                            "diff_mode",
+                            match current_diff_mode {
+                                DiffMode::FixedBase => "fixed",
+                                DiffMode::Sequential => "seq",
+                            },
+                        )
+                        .size(ControlSize::Sm)
+                        .segment("fixed", "Base fija", Some(IconName::Pin))
+                        .segment("seq", "En cadena", Some(IconName::ArrowRight))
+                        .on_change({
+                            let view = view.clone();
+                            move |value, _, cx| {
+                                let new_mode = if value.as_ref() == "seq" {
+                                    DiffMode::Sequential
+                                } else {
+                                    DiffMode::FixedBase
+                                };
+                                view.update(cx, |this, cx| {
+                                    if let Some(c) = &mut this.comparison {
+                                        c.set_diff_mode(new_mode);
+                                        this.refilter();
+                                        this.show_toast(
+                                            if new_mode == DiffMode::Sequential {
+                                                "Modo En cadena: cada archivo se compara con el anterior"
+                                            } else {
+                                                "Modo Base fija: todos se comparan con la base"
+                                            },
+                                            cx,
+                                        );
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        }),
+                    )
+                    .child(
                         SegmentedControl::new(
                             "filter_mode",
                             if self.only_changed { "changed" } else { "all" },
@@ -432,7 +499,7 @@ impl gpui::Render for DiffView {
                         }),
                     )
                     .child(
-                        div().w(px(240.0)).child(
+                        div().w(px(220.0)).child(
                             Input::new(&self.search_input)
                                 .size(ControlSize::Sm)
                                 .prefix(
@@ -544,6 +611,8 @@ impl gpui::Render for DiffView {
                 // ========================================== VISTA 1: TABLA COMPARATIVA
                 ViewMode::Table => {
                     let base_ix = c.base_index;
+                    let diff_mode = c.diff_mode;
+                    let files_count = c.files.len();
 
                     // Encabezado de columnas
                     let mut header = div()
@@ -559,13 +628,17 @@ impl gpui::Render for DiffView {
                         .child(
                             div()
                                 .w(px(PATH_W))
+                                .flex_none()
                                 .px_3()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child("Campo / Ruta JSON"),
                         );
 
                     for (i, f) in c.files.iter().enumerate() {
-                        let is_base = i == base_ix;
+                        let is_base = match diff_mode {
+                            DiffMode::FixedBase => i == base_ix,
+                            DiffMode::Sequential => i == 0,
+                        };
                         let label = format!(
                             "[{}] {}{}",
                             i + 1,
@@ -573,6 +646,78 @@ impl gpui::Render for DiffView {
                             if f.lines_exact { "" } else { " *" }
                         );
                         let full_path = f.path.display().to_string();
+
+                        let can_move_left = i > 0;
+                        let can_move_right = i < files_count - 1;
+
+                        let mut move_controls = div().flex().flex_row().items_center().gap_0p5();
+
+                        if can_move_left {
+                            let view = view.clone();
+                            move_controls = move_controls.child(
+                                IconButton::new(("move_left", i), IconName::ChevronLeft)
+                                    .size(ControlSize::Sm)
+                                    .tooltip("Mover archivo hacia la izquierda")
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.move_file(i, i - 1, cx);
+                                        });
+                                    }),
+                            );
+                        }
+
+                        if can_move_right {
+                            let view = view.clone();
+                            move_controls = move_controls.child(
+                                IconButton::new(("move_right", i), IconName::ChevronRight)
+                                    .size(ControlSize::Sm)
+                                    .tooltip("Mover archivo hacia la derecha")
+                                    .on_click(move |_, _, cx| {
+                                        view.update(cx, |this, cx| {
+                                            this.move_file(i, i + 1, cx);
+                                        });
+                                    }),
+                            );
+                        }
+
+                        let role_badge = match diff_mode {
+                            DiffMode::FixedBase => {
+                                if is_base {
+                                    div().child(Badge::new("Base").tone(Tone::Accent).dot())
+                                } else {
+                                    let view = view.clone();
+                                    div().child(
+                                        Button::new(("set_base", i), "Hacer base")
+                                            .size(ControlSize::Sm)
+                                            .variant(ButtonVariant::Ghost)
+                                            .on_click(move |_, _, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    if let Some(c) = &mut this.comparison {
+                                                        if c.set_base_index(i).is_ok() {
+                                                            this.refilter();
+                                                            this.show_toast(
+                                                                format!(
+                                                                    "Archivo [{}] ahora es la base",
+                                                                    i + 1
+                                                                ),
+                                                                cx,
+                                                            );
+                                                            cx.notify();
+                                                        }
+                                                    }
+                                                });
+                                            }),
+                                    )
+                                }
+                            }
+                            DiffMode::Sequential => {
+                                if i == 0 {
+                                    div().child(Badge::new("Origen").tone(Tone::Accent).dot())
+                                } else {
+                                    div().child(Badge::new(format!("vs [{}]", i)).tone(Tone::Info))
+                                }
+                            }
+                        };
 
                         let col_header = div()
                             .flex_1()
@@ -600,33 +745,15 @@ impl gpui::Render for DiffView {
                                     .tooltip(Tooltip::text(full_path))
                                     .child(label),
                             )
-                            .child(if is_base {
-                                div().child(Badge::new("Base").tone(Tone::Accent).dot())
-                            } else {
-                                let view = view.clone();
-                                div().child(
-                                    Button::new(("set_base", i), "Hacer base")
-                                        .size(ControlSize::Sm)
-                                        .variant(ButtonVariant::Ghost)
-                                        .on_click(move |_, _, cx| {
-                                            view.update(cx, |this, cx| {
-                                                if let Some(c) = &mut this.comparison {
-                                                    if c.set_base_index(i).is_ok() {
-                                                        this.refilter();
-                                                        this.show_toast(
-                                                            format!(
-                                                                "Archivo [{}] ahora es la base",
-                                                                i + 1
-                                                            ),
-                                                            cx,
-                                                        );
-                                                        cx.notify();
-                                                    }
-                                                }
-                                            });
-                                        }),
-                                )
-                            });
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(role_badge)
+                                    .child(move_controls),
+                            );
 
                         header = header.child(col_header);
                     }
@@ -635,8 +762,6 @@ impl gpui::Render for DiffView {
                     let visible_indices = self.visible.clone();
                     let list_indices = visible_indices.clone();
                     let rows_data = c.rows.clone();
-                    let files_count = c.files.len();
-                    let base_ix = c.base_index;
                     let list_view = view.clone();
 
                     let list = uniform_list(
@@ -651,8 +776,6 @@ impl gpui::Render for DiffView {
                                     let row_idx = list_indices[ix];
                                     let row = &rows_data[row_idx];
                                     let is_diff = row.changed;
-                                    let base_cell =
-                                        row.cells.get(base_ix).and_then(|c| c.as_ref());
 
                                     let mut row_el = div()
                                         .id(("row", row_idx))
@@ -683,6 +806,7 @@ impl gpui::Render for DiffView {
                                     let path_cell = div()
                                         .id(("path_cell", row_idx))
                                         .w(px(PATH_W))
+                                        .flex_none()
                                         .px_3()
                                         .flex()
                                         .flex_row()
@@ -752,7 +876,27 @@ impl gpui::Render for DiffView {
 
                                     // Columnas de valores
                                     for file_col in 0..files_count {
-                                        let is_base = file_col == base_ix;
+                                        let (is_base, ref_cell, ref_label) = match diff_mode {
+                                            DiffMode::FixedBase => (
+                                                file_col == base_ix,
+                                                row.cells.get(base_ix).and_then(|c| c.as_ref()),
+                                                format!("[{}]", base_ix + 1),
+                                            ),
+                                            DiffMode::Sequential => {
+                                                if file_col == 0 {
+                                                    (true, None, "[1]".to_string())
+                                                } else {
+                                                    (
+                                                        false,
+                                                        row.cells
+                                                            .get(file_col - 1)
+                                                            .and_then(|c| c.as_ref()),
+                                                        format!("[{}]", file_col),
+                                                    )
+                                                }
+                                            }
+                                        };
+
                                         let cell =
                                             row.cells.get(file_col).and_then(|c| c.as_ref());
 
@@ -762,11 +906,11 @@ impl gpui::Render for DiffView {
                                             let line_info = format!("L{}", c.line);
 
                                             let jtype = detect_json_type(&val_str);
-                                            let (differs_from_base, type_changed, is_new_field) =
+                                            let (differs_from_ref, type_changed, is_new_field) =
                                                 if is_base {
                                                     (false, false, false)
                                                 } else {
-                                                    match base_cell {
+                                                    match ref_cell {
                                                         Some(b) => (
                                                             b.value != c.value,
                                                             is_type_change(&b.value, &c.value),
@@ -777,26 +921,42 @@ impl gpui::Render for DiffView {
                                                 };
 
                                             let tooltip_msg = if is_base {
-                                                format!("Base | L{}\nClic para copiar valor", c.line)
+                                                if diff_mode == DiffMode::Sequential {
+                                                    format!(
+                                                        "Origen [1] (inicio de secuencia) | L{}\nClic para copiar valor",
+                                                        c.line
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "Base fija [{}] | L{}\nClic para copiar valor",
+                                                        base_ix + 1,
+                                                        c.line
+                                                    )
+                                                }
                                             } else if is_new_field {
                                                 format!(
-                                                    "Nuevo campo (no existe en la base) | L{}\nClic para copiar valor",
-                                                    c.line
+                                                    "Nuevo campo (no existía en {}) | L{}\nClic para copiar valor",
+                                                    ref_label, c.line
                                                 )
                                             } else if type_changed {
                                                 format!(
-                                                    "Cambio de tipo vs base\nBase: {}\nActual: {}\nClic para copiar",
-                                                    base_cell.map(|b| b.value.as_str()).unwrap_or(""),
+                                                    "Cambio de tipo vs {}\nAnterior: {}\nActual: {}\nClic para copiar",
+                                                    ref_label,
+                                                    ref_cell.map(|b| b.value.as_str()).unwrap_or(""),
                                                     val_str
                                                 )
-                                            } else if differs_from_base {
+                                            } else if differs_from_ref {
                                                 format!(
-                                                    "Difiere de la base\nBase: {}\nActual: {}\nClic para copiar",
-                                                    base_cell.map(|b| b.value.as_str()).unwrap_or(""),
+                                                    "Difiere de {}\nAnterior: {}\nActual: {}\nClic para copiar",
+                                                    ref_label,
+                                                    ref_cell.map(|b| b.value.as_str()).unwrap_or(""),
                                                     val_str
                                                 )
                                             } else {
-                                                format!("Idéntico a la base | L{}\nClic para copiar", c.line)
+                                                format!(
+                                                    "Idéntico a {} | L{}\nClic para copiar",
+                                                    ref_label, c.line
+                                                )
                                             };
 
                                             let mut val_content = div()
@@ -835,7 +995,7 @@ impl gpui::Render for DiffView {
                                                     val_content = val_content.child(
                                                         div()
                                                             .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(if differs_from_base {
+                                                            .text_color(if differs_from_ref {
                                                                 colors.warning
                                                             } else if is_base {
                                                                 colors.accent
@@ -851,12 +1011,12 @@ impl gpui::Render for DiffView {
                                                             .overflow_hidden()
                                                             .whitespace_nowrap()
                                                             .text_ellipsis()
-                                                            .font_weight(if differs_from_base {
+                                                            .font_weight(if differs_from_ref {
                                                                 FontWeight::MEDIUM
                                                             } else {
                                                                 FontWeight::NORMAL
                                                             })
-                                                            .text_color(if differs_from_base {
+                                                            .text_color(if differs_from_ref {
                                                                 colors.fg
                                                             } else {
                                                                 colors.fg_muted
@@ -887,7 +1047,7 @@ impl gpui::Render for DiffView {
                                                             .overflow_hidden()
                                                             .whitespace_nowrap()
                                                             .text_ellipsis()
-                                                            .text_color(if differs_from_base {
+                                                            .text_color(if differs_from_ref {
                                                                 colors.fg
                                                             } else {
                                                                 colors.fg_muted
@@ -931,7 +1091,7 @@ impl gpui::Render for DiffView {
                                                     }
                                                 });
 
-                                            if differs_from_base {
+                                            if differs_from_ref {
                                                 cell_box = cell_box
                                                     .bg(colors.warning.opacity(0.10))
                                                     .border_1()
@@ -954,7 +1114,7 @@ impl gpui::Render for DiffView {
                                                 )
                                                 .child(val_content)
                                         } else {
-                                            if base_cell.is_some() {
+                                            if ref_cell.is_some() {
                                                 div()
                                                     .id(("val_cell_empty", row_idx * 10 + file_col))
                                                     .flex_1()
@@ -969,9 +1129,10 @@ impl gpui::Render for DiffView {
                                                     .bg(colors.danger.opacity(0.08))
                                                     .border_1()
                                                     .border_color(colors.danger.opacity(0.25))
-                                                    .tooltip(Tooltip::text(
-                                                        "Campo ausente en este archivo (presente en la base)",
-                                                    ))
+                                                    .tooltip(Tooltip::text(format!(
+                                                        "Campo ausente en este archivo (presente en {})",
+                                                        ref_label
+                                                    )))
                                                     .child(
                                                         Badge::new("Ausente")
                                                             .tone(Tone::Danger)

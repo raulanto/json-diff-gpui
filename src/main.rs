@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[cfg(feature = "gui")]
 mod gui;
 
-const USAGE: &str = "Uso: json-diff [--cli] [--all] <a.json> <b.json> [... hasta 6]\n\
+const USAGE: &str = "Uso: json-diff [--cli] [--all] <a.json> <b.json> [... hasta 10]\n\
   Sin argumentos abre la ventana y permite elegir archivos.\n\
   --cli   imprime el reporte en la terminal en lugar de abrir la ventana\n\
   --all   (con --cli) incluye también los campos sin cambios";

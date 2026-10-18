@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const MIN_FILES: usize = 2;
-pub const MAX_FILES: usize = 6;
+pub const MAX_FILES: usize = 10;
 
 /// Una hoja del JSON: ruta, número de línea (base 1) y valor renderizado.
 #[derive(Debug, Clone, PartialEq)]
@@ -106,16 +106,32 @@ pub struct Row {
     pub changed: bool,
 }
 
+/// Modo de comparación entre archivos JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiffMode {
+    /// Todas las versiones se comparan contra un archivo base fijo (`base_index`).
+    #[default]
+    FixedBase,
+    /// Cada versión se compara contra la inmediatamente anterior (1 vs 0, 2 vs 1, 3 vs 2...).
+    Sequential,
+}
+
 #[derive(Debug, Clone)]
 pub struct Comparison {
     pub files: Vec<LoadedFile>,
     pub rows: Vec<Row>,
     pub base_index: usize,
+    pub diff_mode: DiffMode,
 }
 
 impl Comparison {
     pub fn changed_count(&self) -> usize {
         self.rows.iter().filter(|r| r.changed).count()
+    }
+
+    pub fn set_diff_mode(&mut self, mode: DiffMode) {
+        self.diff_mode = mode;
+        self.recompute_changes();
     }
 
     pub fn set_base_index(&mut self, base_index: usize) -> Result<(), String> {
@@ -126,13 +142,100 @@ impl Comparison {
             ));
         }
         self.base_index = base_index;
-        for row in &mut self.rows {
-            let base_val = row.cells[base_index].as_ref().map(|c| &c.value);
-            row.changed = row
-                .cells
-                .iter()
-                .any(|c| c.as_ref().map(|c| &c.value) != base_val);
+        self.recompute_changes();
+        Ok(())
+    }
+
+    /// Recalcula el estado `Row.changed` de todas las filas según el `diff_mode` activo.
+    pub fn recompute_changes(&mut self) {
+        match self.diff_mode {
+            DiffMode::FixedBase => {
+                let base_index = self.base_index;
+                for row in &mut self.rows {
+                    let base_val = row
+                        .cells
+                        .get(base_index)
+                        .and_then(|c| c.as_ref())
+                        .map(|c| &c.value);
+                    row.changed = row
+                        .cells
+                        .iter()
+                        .any(|c| c.as_ref().map(|c| &c.value) != base_val);
+                }
+            }
+            DiffMode::Sequential => {
+                for row in &mut self.rows {
+                    let mut changed = false;
+                    for i in 1..row.cells.len() {
+                        let prev_val = row.cells[i - 1].as_ref().map(|c| &c.value);
+                        let curr_val = row.cells[i].as_ref().map(|c| &c.value);
+                        if prev_val != curr_val {
+                            changed = true;
+                            break;
+                        }
+                    }
+                    row.changed = changed;
+                }
+            }
         }
+    }
+
+    /// Mueve un archivo de la posición `from` a la posición `to`, reordenando columnas y datos.
+    pub fn move_file(&mut self, from: usize, to: usize) -> Result<(), String> {
+        if from >= self.files.len() || to >= self.files.len() {
+            return Err(format!(
+                "Índice fuera de rango: from={from}, to={to} (total: {})",
+                self.files.len()
+            ));
+        }
+        if from == to {
+            return Ok(());
+        }
+
+        let file = self.files.remove(from);
+        self.files.insert(to, file);
+
+        for row in &mut self.rows {
+            let cell = row.cells.remove(from);
+            row.cells.insert(to, cell);
+        }
+
+        if self.base_index == from {
+            self.base_index = to;
+        } else if from < self.base_index && to >= self.base_index {
+            self.base_index -= 1;
+        } else if from > self.base_index && to <= self.base_index {
+            self.base_index += 1;
+        }
+
+        self.recompute_changes();
+        Ok(())
+    }
+
+    /// Intercambia las posiciones de dos archivos `a` y `b`.
+    pub fn swap_files(&mut self, a: usize, b: usize) -> Result<(), String> {
+        if a >= self.files.len() || b >= self.files.len() {
+            return Err(format!(
+                "Índices fuera de rango: a={a}, b={b} (total: {})",
+                self.files.len()
+            ));
+        }
+        if a == b {
+            return Ok(());
+        }
+
+        self.files.swap(a, b);
+        for row in &mut self.rows {
+            row.cells.swap(a, b);
+        }
+
+        if self.base_index == a {
+            self.base_index = b;
+        } else if self.base_index == b {
+            self.base_index = a;
+        }
+
+        self.recompute_changes();
         Ok(())
     }
 }
@@ -319,11 +422,18 @@ pub fn compare_with_base(files: Vec<LoadedFile>, base_index: usize) -> Result<Co
         files,
         rows,
         base_index,
+        diff_mode: DiffMode::FixedBase,
     })
 }
 
 pub fn compare(files: Vec<LoadedFile>) -> Result<Comparison, String> {
     compare_with_base(files, 0)
+}
+
+pub fn compare_sequential(files: Vec<LoadedFile>) -> Result<Comparison, String> {
+    let mut c = compare_with_base(files, 0)?;
+    c.set_diff_mode(DiffMode::Sequential);
+    Ok(c)
 }
 
 pub fn compare_paths_with_base(paths: &[PathBuf], base_index: usize) -> Result<Comparison, String> {
@@ -360,8 +470,19 @@ pub fn text_report(c: &Comparison, only_changed: bool) -> String {
     let mut out = String::new();
     for (i, f) in c.files.iter().enumerate() {
         out.push_str(&format!("[{}] {}", i + 1, f.path.display()));
-        if i == c.base_index {
-            out.push_str("  (base)");
+        match c.diff_mode {
+            DiffMode::FixedBase => {
+                if i == c.base_index {
+                    out.push_str("  (base)");
+                }
+            }
+            DiffMode::Sequential => {
+                if i == 0 {
+                    out.push_str("  (origen)");
+                } else {
+                    out.push_str(&format!("  (vs [{}])", i));
+                }
+            }
         }
         if !f.lines_exact {
             out.push_str("  (líneas según formato normalizado)");
@@ -369,9 +490,13 @@ pub fn text_report(c: &Comparison, only_changed: bool) -> String {
         out.push('\n');
     }
     out.push_str(&format!(
-        "\n{} de {} campos con diferencias\n\n",
+        "\n{} de {} campos con diferencias ({})\n\n",
         c.changed_count(),
-        c.rows.len()
+        c.rows.len(),
+        match c.diff_mode {
+            DiffMode::FixedBase => "Modo: Base fija",
+            DiffMode::Sequential => "Modo: En cadena secuencial",
+        }
     ));
     for r in c.rows.iter().filter(|r| !only_changed || r.changed) {
         out.push_str(&format!(
@@ -395,18 +520,45 @@ pub fn text_report(c: &Comparison, only_changed: bool) -> String {
 pub fn export_markdown(c: &Comparison, only_changed: bool) -> String {
     let mut out = String::new();
     out.push_str("# Reporte de Diferencias JSON\n\n");
-    out.push_str(&format!(
-        "**{} de {} campos con diferencias** (Base: [{}] `{}`)\n\n",
-        c.changed_count(),
-        c.rows.len(),
-        c.base_index + 1,
-        c.files[c.base_index].name
-    ));
+    match c.diff_mode {
+        DiffMode::FixedBase => {
+            out.push_str(&format!(
+                "**{} de {} campos con diferencias** (Base: [{}] `{}`)\n\n",
+                c.changed_count(),
+                c.rows.len(),
+                c.base_index + 1,
+                c.files[c.base_index].name
+            ));
+        }
+        DiffMode::Sequential => {
+            out.push_str(&format!(
+                "**{} de {} campos con diferencias** (Modo: En cadena secuencial [1] -> ... -> [{}])\n\n",
+                c.changed_count(),
+                c.rows.len(),
+                c.files.len()
+            ));
+        }
+    }
 
     out.push_str("| Estado | Campo |");
     for (i, f) in c.files.iter().enumerate() {
-        let is_base = if i == c.base_index { " *(base)*" } else { "" };
-        out.push_str(&format!(" [{}] {}{} |", i + 1, f.name, is_base));
+        let tag = match c.diff_mode {
+            DiffMode::FixedBase => {
+                if i == c.base_index {
+                    " *(base)*".to_string()
+                } else {
+                    String::new()
+                }
+            }
+            DiffMode::Sequential => {
+                if i == 0 {
+                    " *(origen)*".to_string()
+                } else {
+                    format!(" *(vs [{}])*", i)
+                }
+            }
+        };
+        out.push_str(&format!(" [{}] {}{} |", i + 1, f.name, tag));
     }
     out.push('\n');
 
@@ -523,12 +675,72 @@ mod tests {
     }
 
     #[test]
-    fn three_to_six_files() {
+    fn test_files_limits_up_to_ten() {
         let mk = |n: i32| load(&format!(r#"{{"k":{n}}}"#), "f");
         assert!(compare(vec![mk(1)]).is_err());
-        assert!(compare((0..7).map(mk).collect()).is_err());
+        assert!(compare((0..11).map(mk).collect()).is_err());
+        // 10 archivos es válido:
+        let ten = compare((0..10).map(mk).collect());
+        assert!(ten.is_ok());
         let c = compare(vec![mk(1), mk(1), mk(2), mk(1)]).unwrap();
         assert_eq!(c.changed_count(), 1);
+    }
+
+    #[test]
+    fn test_sequential_diff_mode() {
+        // a: step 1, status: "init"
+        let a = load(r#"{"step":1,"status":"init"}"#, "a");
+        // b: step 2, status: "init" (cambia step, no status)
+        let b = load(r#"{"step":2,"status":"init"}"#, "b");
+        // c: step 2, status: "done" (no cambia step vs b, cambia status vs b)
+        let c = load(r#"{"step":2,"status":"done"}"#, "c");
+
+        let mut comp = compare(vec![a, b, c]).unwrap();
+
+        // En FixedBase (base a):
+        assert_eq!(comp.diff_mode, DiffMode::FixedBase);
+        assert_eq!(comp.changed_count(), 2);
+
+        // Cambiamos a Sequential:
+        comp.set_diff_mode(DiffMode::Sequential);
+        assert_eq!(comp.diff_mode, DiffMode::Sequential);
+        // Ambos campos sufrieron algún cambio a lo largo de la secuencia:
+        assert_eq!(comp.changed_count(), 2);
+
+        // Si creamos una secuencia donde nada cambia:
+        let a2 = load(r#"{"x":10}"#, "a2");
+        let b2 = load(r#"{"x":10}"#, "b2");
+        let c2 = load(r#"{"x":10}"#, "c2");
+        let comp2 = compare_sequential(vec![a2, b2, c2]).unwrap();
+        assert_eq!(comp2.changed_count(), 0);
+    }
+
+    #[test]
+    fn test_move_and_swap_files() {
+        let a = load(r#"{"name":"A"}"#, "a");
+        let b = load(r#"{"name":"B"}"#, "b");
+        let c = load(r#"{"name":"C"}"#, "c");
+        let mut comp = compare(vec![a, b, c]).unwrap();
+        assert_eq!(comp.files[0].name, "a");
+        assert_eq!(comp.files[1].name, "b");
+        assert_eq!(comp.files[2].name, "c");
+
+        // Mover archivo 'a' (pos 0) a pos 2
+        comp.move_file(0, 2).unwrap();
+        assert_eq!(comp.files[0].name, "b");
+        assert_eq!(comp.files[1].name, "c");
+        assert_eq!(comp.files[2].name, "a");
+
+        // row.cells se deben haber reordenado
+        let row = &comp.rows[0];
+        assert_eq!(row.cells[0].as_ref().unwrap().value, "\"B\"");
+        assert_eq!(row.cells[1].as_ref().unwrap().value, "\"C\"");
+        assert_eq!(row.cells[2].as_ref().unwrap().value, "\"A\"");
+
+        // Intercambiar pos 0 y pos 1
+        comp.swap_files(0, 1).unwrap();
+        assert_eq!(comp.files[0].name, "c");
+        assert_eq!(comp.files[1].name, "b");
     }
 
     #[test]

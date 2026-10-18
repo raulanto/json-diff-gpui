@@ -1,15 +1,19 @@
 # json-diff-gpui
 
-Herramienta de escritorio en **Rust + [GPUI](https://www.gpui.rs/)** para comparar de **2 a 6 archivos JSON** y ver de inmediato **qué campos y qué líneas cambiaron**.
+Herramienta de escritorio en **Rust + [GPUI](https://www.gpui.rs/)** para comparar de **2 a 10 archivos JSON** y ver de inmediato **qué campos y qué líneas cambiaron**.
 
 Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.json`, `*_promotor_solventado_*.json`, …): se generan varias versiones del mismo archivo y esta herramienta señala dónde buscar.
 
 ## Qué hace
 
 - **Tres modos de visualización integrados**:
-  - **Tabla (Matriz)**: compara de 2 a 6 archivos JSON a la vez con columnas independientes, rutas aplanadas y números de línea exactos.
+  - **Tabla (Matriz)**: compara de 2 a 10 archivos JSON a la vez con columnas independientes, rutas aplanadas y números de línea exactos.
   - **Diff Estilo Git (`DiffViewer`)**: visor unificado (`Unified`) o dividido (`Split` lado a lado) con estadísticas de cambios (`+agregados -eliminados`), resaltado de palabras y plegado de líneas idénticas.
   - **Editor en Vivo (`CodeEditor`)**: edición directa del JSON con resaltado de sintaxis, números de línea, marcas en el gutter respecto al archivo base, formateo automático (pretty-print con 2 espacios), validación sintáctica, aplicación de cambios en memoria al diff al instante y guardado en disco.
+- **Modos de comparación flexibles**:
+  - **Base fija**: todos los archivos se contrastan con un único archivo base seleccionado.
+  - **En cadena (secuencial)**: cada archivo se compara contra el anterior (1 vs 0, 2 vs 1, 3 vs 2...), ideal para ver la evolución paso a paso de múltiples versiones.
+- **Reordenamiento interactivo**: flechas en cada columna para mover y reordenar archivos a la izquierda o derecha en tiempo real.
 - **Selector de archivo base dinámico**: cambia el archivo base con un clic en «Hacer base» en la columna que desees o selecciónalo para contrastar en el Diff Git.
 - **Búsqueda en tiempo real**: filtra campos o valores al instante mediante el campo de búsqueda integrado en la tabla.
 - **Copiar al portapapeles y exportar**: copia la ruta del campo o valores individuales al portapapeles, o exporta el reporte tabular a Markdown.

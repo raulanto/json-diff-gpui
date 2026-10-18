@@ -42,8 +42,10 @@ cargo run --release                   # abre la ventana
 - `serde_json` se usa con `preserve_order`; sin esa feature las líneas no coincidirían con el archivo original.
 - Se compara por **ruta**, no por posición de línea.
 - Valores comparados como JSON renderizado: `"17"` ≠ `17`, `""` ≠ `null`. Es intencional.
-- Límites: `MIN_FILES = 2`, `MAX_FILES = 6` (en `lib.rs`; la UI los importa).
-- La base de la comparación puede seleccionarse dinámicamente (por defecto es el primer archivo).
+- Límites: `MIN_FILES = 2`, `MAX_FILES = 10` (en `lib.rs`; la UI los importa).
+- Soporta modos de comparación: `DiffMode::FixedBase` (contra archivo base único) y `DiffMode::Sequential` (en cadena: col 1 vs col 0, col 2 vs col 1, col 3 vs col 2...).
+- Reordenamiento interactivo de columnas con `move_file` / `swap_files` directamente en la UI.
+- La base de la comparación puede seleccionarse dinámicamente en modo base fija.
 
 ## Dependencias GPUI y Ely
 
@@ -62,4 +64,5 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 - [x] Copiar ruta/valor al portapapeles (implementado).
 - [x] Buscar por nombre de campo o valor (implementado con `SearchInput`/`Input` en `gui.rs` y `matches_filter` en `lib.rs`).
 - [x] Exportar el reporte a Markdown/CSV (implementado en `lib.rs` con botón de copia en la UI).
+- [x] Comparación en cadena secuencial (1 vs 0, 2 vs 1, 3 vs 2...) y reordenamiento de archivos (hasta 10 JSON).
 - [ ] Comparar arreglos por clave (p. ej. por `id`) en vez de por índice.
