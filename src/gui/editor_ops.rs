@@ -100,6 +100,7 @@ impl DiffView {
         });
 
         self.editor = Some(editor);
+        self.update_schema_editor(window, cx);
     }
 
     /// Formatea el contenido del editor con 2 espacios e identación normalizada.
@@ -111,6 +112,7 @@ impl DiffView {
                 editor.update(cx, |ed, cx| {
                     ed.set_text(formatted, cx);
                 });
+                self.sync_schema_if_present(cx);
                 self.show_toast("JSON formateado correctamente (2 espacios)", cx);
             }
             Err(e) => {
@@ -166,6 +168,7 @@ impl DiffView {
                                 ed.set_git_marks(marks, cx);
                             });
                         }
+                        self.sync_schema_if_present(cx);
                         self.show_toast("Cambios aplicados al diff exitosamente", cx);
                         cx.notify();
                     }
@@ -216,17 +219,22 @@ impl DiffView {
         cx.notify();
     }
 
+    /// Abre y enfoca el widget de búsqueda en el editor.
+    pub(crate) fn open_find_widget(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_find_widget = true;
+        let handle = self.find_input.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
+        self.update_find_matches(cx);
+        cx.notify();
+    }
+
     /// Alterna la visibilidad del widget de búsqueda en el editor.
     pub(crate) fn toggle_find_widget(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_find_widget = !self.show_find_widget;
         if self.show_find_widget {
-            let handle = self.find_input.read(cx).focus_handle(cx);
-            window.focus(&handle, cx);
-            self.update_find_matches(cx);
+            self.close_find_widget(Some(window), cx);
         } else {
-            self.close_find_widget(cx);
+            self.open_find_widget(window, cx);
         }
-        cx.notify();
     }
 
     /// Actualiza y resalta las coincidencias de búsqueda en el editor activo.
@@ -366,14 +374,129 @@ impl DiffView {
         }
     }
 
-    /// Cierra el widget de búsqueda y limpia los resaltados en el editor.
-    pub(crate) fn close_find_widget(&mut self, cx: &mut Context<Self>) {
+    /// Cierra el widget de búsqueda y limpia los resaltados en el editor, devolviendo opcionalmente el foco.
+    pub(crate) fn close_find_widget(
+        &mut self,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         self.show_find_widget = false;
         self.find_matches.clear();
         self.find_current_index = None;
         if let Some(editor) = &self.editor {
             editor.update(cx, |ed, cx| ed.set_backgrounds(Vec::new(), cx));
+            if let Some(w) = window {
+                let handle = editor.read(cx).focus_handle(cx);
+                w.focus(&handle, cx);
+            }
         }
+        cx.notify();
+    }
+
+    /// Regenera e inicializa o actualiza el CodeEditor del panel lateral de Schema para el archivo JSON activo.
+    pub(crate) fn update_schema_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = if let Some(editor) = &self.editor {
+            editor.read(cx).text().to_string()
+        } else if let Some(c) = &self.comparison {
+            if self.editor_file_idx < c.files.len() {
+                c.files[self.editor_file_idx].content.clone()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        if text.trim().is_empty() {
+            self.schema_editor = None;
+            self.generated_schema_text.clear();
+            return;
+        }
+
+        let title = self
+            .comparison
+            .as_ref()
+            .and_then(|c| c.files.get(self.editor_file_idx))
+            .map(|f| f.name.as_str())
+            .unwrap_or("DocumentSchema");
+
+        match generate_schema_from_str(&text, Some(title)) {
+            Ok(schema_str) => {
+                if let Some(schema_ed) = &self.schema_editor {
+                    schema_ed.update(cx, |ed, cx| {
+                        ed.set_text(schema_str.clone(), cx);
+                    });
+                } else {
+                    let ed_text = schema_str.clone();
+                    let schema_editor = cx.new(|cx| {
+                        CodeEditor::new(ed_text, window, cx)
+                            .language("json")
+                            .line_numbers(LineNumbers::Absolute)
+                            .read_only()
+                            .rainbow_brackets()
+                            .minimap()
+                    });
+                    self.schema_editor = Some(schema_editor);
+                }
+                self.generated_schema_text = schema_str;
+            }
+            Err(e) => {
+                self.generated_schema_text = format!("// Error al generar schema:\n// {e}");
+                if let Some(schema_ed) = &self.schema_editor {
+                    schema_ed.update(cx, |ed, cx| {
+                        ed.set_text(self.generated_schema_text.clone(), cx);
+                    });
+                } else {
+                    let ed_text = self.generated_schema_text.clone();
+                    let schema_editor = cx.new(|cx| {
+                        CodeEditor::new(ed_text, window, cx)
+                            .language("json")
+                            .line_numbers(LineNumbers::Absolute)
+                            .read_only()
+                    });
+                    self.schema_editor = Some(schema_editor);
+                }
+            }
+        }
+    }
+
+    /// Sincroniza el contenido del editor de schema si ya está instanciado.
+    pub(crate) fn sync_schema_if_present(&mut self, cx: &mut Context<Self>) {
+        if let Some(schema_ed) = &self.schema_editor {
+            let text = if let Some(editor) = &self.editor {
+                editor.read(cx).text().to_string()
+            } else {
+                return;
+            };
+            let title = self
+                .comparison
+                .as_ref()
+                .and_then(|c| c.files.get(self.editor_file_idx))
+                .map(|f| f.name.as_str())
+                .unwrap_or("DocumentSchema");
+            if let Ok(schema_str) = generate_schema_from_str(&text, Some(title)) {
+                schema_ed.update(cx, |ed, cx| {
+                    ed.set_text(schema_str.clone(), cx);
+                });
+                self.generated_schema_text = schema_str;
+            }
+        }
+    }
+
+    /// Alterna la visibilidad del panel lateral de JSON Schema en la vista del editor.
+    pub(crate) fn toggle_schema_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_schema_panel = !self.show_schema_panel;
+        if self.show_schema_panel && self.schema_editor.is_none() {
+            self.update_schema_editor(window, cx);
+        }
+        self.show_toast(
+            if self.show_schema_panel {
+                "Panel de JSON Schema visible"
+            } else {
+                "Panel de JSON Schema oculto"
+            },
+            cx,
+        );
         cx.notify();
     }
 

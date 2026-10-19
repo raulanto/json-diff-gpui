@@ -89,9 +89,16 @@ pub fn render_command_palette(view: Entity<DiffView>) -> impl IntoElement {
             )
             .icon(IconName::Search)
             .keys("secondary-f"),
-            Command::new("preview_schema", "Previsualizar JSON Schema estructural")
-                .icon(IconName::FileJson)
-                .keys("secondary-j"),
+            Command::new(
+                "toggle_schema_panel",
+                "Alternar panel lateral de JSON Schema",
+            )
+            .icon(IconName::PanelRight)
+            .keys("secondary-j"),
+            Command::new("open_schema_dialog", "Abrir JSON Schema en ventana modal")
+                .icon(IconName::FileJson),
+            Command::new("refresh_schema", "Sincronizar JSON Schema con el editor")
+                .icon(IconName::RefreshCw),
             Command::new("format_json", "Formatear JSON (2 espacios)")
                 .icon(IconName::Sparkles)
                 .keys("secondary-shift-i"),

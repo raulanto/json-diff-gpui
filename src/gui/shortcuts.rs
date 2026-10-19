@@ -84,7 +84,7 @@ pub fn shortcuts_list() -> Vec<Shortcut> {
         },
         Shortcut {
             group: "Editor".into(),
-            name: "Previsualizar JSON Schema".into(),
+            name: "Alternar panel lateral de JSON Schema".into(),
             keys: "secondary-j".into(),
         },
         Shortcut {
@@ -224,12 +224,26 @@ pub fn run_command_action(
             state.reset_selector(cx);
         }
         "find_in_editor" => {
-            if state.view_mode == ViewMode::Editor {
-                state.toggle_find_widget(window, cx);
+            if state.view_mode != ViewMode::Editor {
+                state.view_mode = ViewMode::Editor;
+                state.init_editor_if_needed(window, cx);
             }
+            state.open_find_widget(window, cx);
         }
-        "preview_schema" => {
+        "toggle_schema_panel" => {
+            if state.view_mode != ViewMode::Editor {
+                state.view_mode = ViewMode::Editor;
+                state.init_editor_if_needed(window, cx);
+            }
+            state.toggle_schema_panel(window, cx);
+        }
+        "open_schema_dialog" => {
             state.open_schema_dialog(window, cx);
+        }
+        "refresh_schema" => {
+            state.update_schema_editor(window, cx);
+            state.show_toast("JSON Schema sincronizado ✓", cx);
+            cx.notify();
         }
         "format_json" => {
             if state.view_mode == ViewMode::Editor {
@@ -315,7 +329,7 @@ pub fn handle_global_key(
 
     if key.eq_ignore_ascii_case("escape") {
         if state.show_find_widget {
-            state.close_find_widget(cx);
+            state.close_find_widget(Some(window), cx);
             return true;
         }
         if state.show_schema_dialog {
@@ -486,12 +500,18 @@ pub fn handle_global_key(
 
     if state.view_mode == ViewMode::Editor {
         if ctrl_or_cmd && key.eq_ignore_ascii_case("f") && !shift {
-            state.toggle_find_widget(window, cx);
+            state.open_find_widget(window, cx);
+            return true;
+        }
+
+        if ctrl_or_cmd && key.eq_ignore_ascii_case("f") && shift {
+            state.show_replace = true;
+            state.open_find_widget(window, cx);
             return true;
         }
 
         if ctrl_or_cmd && key.eq_ignore_ascii_case("j") && !shift {
-            state.open_schema_dialog(window, cx);
+            state.toggle_schema_panel(window, cx);
             return true;
         }
 

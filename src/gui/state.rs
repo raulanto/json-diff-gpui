@@ -51,7 +51,8 @@ pub struct DiffView {
     pub(crate) find_current_index: Option<usize>,
     pub(crate) show_replace: bool,
 
-    // Previsualización de JSON Schema
+    // Previsualización y panel de JSON Schema
+    pub(crate) show_schema_panel: bool,
     pub(crate) show_schema_dialog: bool,
     pub(crate) schema_editor: Option<Entity<CodeEditor>>,
     pub(crate) generated_schema_text: String,
@@ -155,18 +156,29 @@ impl DiffView {
 
         let find_input =
             cx.new(|cx| TextInput::new(window, cx).placeholder("Buscar en el editor…"));
-        let find_sub = cx.subscribe(&find_input, |this, _, event: &InputEvent, cx| {
-            if let InputEvent::Changed = event {
+        let find_sub = cx.subscribe(&find_input, |this, _, event: &InputEvent, cx| match event {
+            InputEvent::Changed => {
                 this.update_find_matches(cx);
             }
+            InputEvent::Submit => {
+                this.step_find_match(true, cx);
+            }
+            _ => {}
         });
 
         let replace_input = cx.new(|cx| TextInput::new(window, cx).placeholder("Reemplazar por…"));
-        let replace_sub = cx.subscribe(&replace_input, |_, _, event: &InputEvent, cx| {
-            if let InputEvent::Changed = event {
-                cx.notify();
-            }
-        });
+        let replace_sub = cx.subscribe(
+            &replace_input,
+            |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Changed => {
+                    cx.notify();
+                }
+                InputEvent::Submit => {
+                    this.replace_find_match(false, cx);
+                }
+                _ => {}
+            },
+        );
 
         let settings_shortcuts_search =
             cx.new(|cx| TextInput::new(window, cx).placeholder("Buscar atajos de teclado…"));
@@ -268,6 +280,7 @@ impl DiffView {
             find_matches: Vec::new(),
             find_current_index: None,
             show_replace: false,
+            show_schema_panel: true,
             show_schema_dialog: false,
             schema_editor: None,
             generated_schema_text: String::new(),
