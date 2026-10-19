@@ -4,9 +4,9 @@ use crate::gui::DiffView;
 use ely_gpui_component::{
     editor::{Project, RecentProjects, WelcomePage},
     primitives::{Icon, IconName},
-    theme::{ActiveTheme, Elevation, IconSize, Radius, TextSize},
+    theme::{ActiveTheme, IconSize, Radius, TextSize},
 };
-use gpui::{div, prelude::*, px, Context, Entity, FontWeight, IntoElement};
+use gpui::{div, prelude::*, Context, Entity, FontWeight, IntoElement};
 
 /// Renderiza la vista de bienvenida utilizando WelcomePage de Ely Components,
 /// adaptada para abarcar todo el contenedor y ofrecer máxima legibilidad y espacio.
@@ -169,20 +169,6 @@ pub fn render_empty_view(
         .flex_col()
         .flex_1()
         .size_full()
-        .p_6()
         .overflow_y_scroll()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .size_full()
-                .min_h(px(520.0))
-                .rounded(theme.radius(Radius::Lg))
-                .border_1()
-                .border_color(colors.border)
-                .bg(colors.surface)
-                .shadow(theme.elevation(Elevation::Raised))
-                .child(welcome),
-        )
+        .child(welcome)
 }
