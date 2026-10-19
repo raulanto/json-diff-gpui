@@ -287,4 +287,201 @@ impl DiffView {
         })
         .detach();
     }
+
+    /// Guarda el proyecto activo actual como un bundle con todos sus archivos JSON en disco.
+    pub(crate) fn save_current_project_bundle(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_current_project_state();
+        let projects_dir = self.workspace.projects_dir();
+
+        let files_content: Vec<(String, String)> = if let Some(c) = &self.comparison {
+            c.files
+                .iter()
+                .map(|f| (f.name.clone(), f.content.clone()))
+                .collect()
+        } else {
+            self.paths
+                .iter()
+                .filter_map(|p| {
+                    let name = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("archivo.json")
+                        .to_string();
+                    std::fs::read_to_string(p)
+                        .ok()
+                        .map(|content| (name, content))
+                })
+                .collect()
+        };
+
+        if files_content.is_empty() {
+            self.show_toast(
+                "El proyecto no tiene archivos JSON para guardar en disco",
+                cx,
+            );
+            return;
+        }
+
+        let Some(active) = self.workspace.active_project_mut() else {
+            return;
+        };
+
+        match active.save_bundle(&projects_dir, &files_content) {
+            Ok(saved_path) => {
+                let name = active.name.clone();
+                let count = files_content.len();
+                let _ = self.workspace.save_to_disk();
+                self.refresh_discovered_bundles();
+                self.show_toast(
+                    format!(
+                        "Proyecto '{}' guardado con {count} archivos JSON en: {}",
+                        name,
+                        saved_path.display()
+                    ),
+                    cx,
+                );
+                cx.notify();
+            }
+            Err(e) => {
+                self.show_toast(format!("Error al guardar bundle del proyecto: {e}"), cx);
+            }
+        }
+    }
+
+    /// Permite al usuario seleccionar una nueva carpeta raíz para almacenar los proyectos.
+    pub(crate) fn choose_projects_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Selecciona la carpeta raíz donde guardar tus proyectos JSON".into()),
+        });
+
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(paths))) = res {
+                if let Some(first) = paths.first() {
+                    let chosen = first.clone();
+                    this.update(cx, |this, cx| {
+                        this.workspace.set_projects_dir(Some(chosen.clone()));
+                        let _ = this.workspace.save_to_disk();
+                        this.refresh_discovered_bundles();
+                        this.show_toast(
+                            format!("Ubicación de proyectos actualizada: {}", chosen.display()),
+                            cx,
+                        );
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(out) = std::process::Command::new("zenity")
+                    .args([
+                        "--file-selection",
+                        "--directory",
+                        "--title=Selecciona la carpeta raíz de proyectos",
+                    ])
+                    .output()
+                {
+                    if out.status.success() {
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        let trimmed = stdout.trim();
+                        if !trimmed.is_empty() {
+                            let chosen = PathBuf::from(trimmed);
+                            this.update(cx, |this, cx| {
+                                this.workspace.set_projects_dir(Some(chosen.clone()));
+                                let _ = this.workspace.save_to_disk();
+                                this.refresh_discovered_bundles();
+                                this.show_toast(
+                                    format!(
+                                        "Ubicación de proyectos actualizada: {}",
+                                        chosen.display()
+                                    ),
+                                    cx,
+                                );
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Restablece la carpeta de proyectos a la ubicación por defecto del sistema.
+    pub(crate) fn reset_projects_dir(&mut self, cx: &mut Context<Self>) {
+        self.workspace.set_projects_dir(None);
+        let _ = self.workspace.save_to_disk();
+        self.refresh_discovered_bundles();
+        let default_dir = self.workspace.projects_dir();
+        self.show_toast(
+            format!(
+                "Carpeta de proyectos restablecida a la predeterminada: {}",
+                default_dir.display()
+            ),
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Abre un proyecto desde un bundle por su nombre de proyecto o carpeta.
+    pub(crate) fn open_project_bundle_by_name(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let bundle_info = self
+            .discovered_bundles
+            .iter()
+            .find(|b| {
+                b.name == name || b.folder_path.file_name().and_then(|n| n.to_str()) == Some(name)
+            })
+            .cloned();
+
+        let Some(bundle) = bundle_info else {
+            self.show_toast(format!("No se encontró el proyecto '{name}'"), cx);
+            return;
+        };
+
+        match jsondiff::Project::load_bundle(&bundle.folder_path) {
+            Ok(proj) => {
+                let proj_name = proj.name.clone();
+                let file_count = proj.paths.len();
+                self.sync_current_project_state();
+                self.workspace.add_project(proj);
+                self.load_active_project(window, cx);
+                self.show_toast(
+                    format!("Proyecto '{proj_name}' abierto con {file_count} archivos JSON"),
+                    cx,
+                );
+                cx.notify();
+            }
+            Err(e) => {
+                self.show_toast(format!("Error al abrir proyecto: {e}"), cx);
+            }
+        }
+    }
+
+    /// Abre un proyecto a partir de una ruta seleccionada en el FileTree (ej. "Proyecto 1/v1.json").
+    pub(crate) fn open_from_file_tree_path(
+        &mut self,
+        path_str: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let parts: Vec<&str> = path_str.split('/').collect();
+        let project_name = parts.first().copied().unwrap_or(path_str);
+        self.open_project_bundle_by_name(project_name, window, cx);
+    }
 }

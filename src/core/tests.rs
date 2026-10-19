@@ -440,3 +440,50 @@ fn test_json_schema_generation() {
     assert!(schema.get("required").is_none());
     assert!(props["metadata"].get("required").is_none());
 }
+
+#[test]
+fn test_project_bundle_saving_and_loading() {
+    let tmp_root = std::env::temp_dir().join(format!("test_bundle_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_root);
+
+    let mut proj = Project::new("Prueba Bundle");
+    let files = vec![
+        ("a.json".to_string(), "{\"name\":\"Alice\"}".to_string()),
+        ("b.json".to_string(), "{\"name\":\"Bob\"}".to_string()),
+    ];
+
+    let bundle_dir = proj.save_bundle(&tmp_root, &files).unwrap();
+    assert!(bundle_dir.exists());
+    assert!(bundle_dir.join("project.json").exists());
+    assert!(bundle_dir.join("a.json").exists());
+    assert!(bundle_dir.join("b.json").exists());
+
+    let loaded = Project::load_bundle(&bundle_dir).unwrap();
+    assert_eq!(loaded.name, "Prueba Bundle");
+    assert_eq!(loaded.paths.len(), 2);
+
+    let scanned = scan_projects_bundles(&tmp_root);
+    assert_eq!(scanned.len(), 1);
+    assert_eq!(scanned[0].name, "Prueba Bundle");
+    assert_eq!(scanned[0].json_files.len(), 2);
+
+    let tree_paths = bundles_to_file_tree_paths(&scanned);
+    assert!(tree_paths.contains(&"Prueba Bundle/a.json".to_string()));
+    assert!(tree_paths.contains(&"Prueba Bundle/b.json".to_string()));
+
+    let _ = std::fs::remove_dir_all(&tmp_root);
+}
+
+#[test]
+fn test_workspace_projects_dir() {
+    let mut ws = Workspace::new();
+    let def = ws.projects_dir();
+    assert!(def.ends_with("projects"));
+
+    let custom = std::env::temp_dir().join("custom_projects");
+    ws.set_projects_dir(Some(custom.clone()));
+    assert_eq!(ws.projects_dir(), custom);
+
+    ws.set_projects_dir(None);
+    assert_eq!(ws.projects_dir(), def);
+}

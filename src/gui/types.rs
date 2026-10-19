@@ -49,3 +49,11 @@ pub enum SettingsTab {
     Projects,
     Shortcuts,
 }
+
+/// Modo de visualización del explorador de proyectos en disco.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ProjectExplorerView {
+    #[default]
+    FileTree,
+    DirectoryListing,
+}

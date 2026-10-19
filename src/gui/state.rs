@@ -1,6 +1,6 @@
 //! Definición del estado principal de la interfaz gráfica y su inicializador.
 
-use crate::gui::types::{Density, SettingsTab, ViewMode};
+use crate::gui::types::{Density, ProjectExplorerView, SettingsTab, ViewMode};
 use ely_gpui_component::{
     editor::{CodeEditor, FindOptions},
     forms::{InputEvent, TextInput},
@@ -71,6 +71,10 @@ pub struct DiffView {
     pub(crate) project_rename_input: Entity<TextInput>,
     pub(crate) _project_rename_sub: Subscription,
     pub(crate) renaming_project_id: Option<String>,
+
+    // Explorador de proyectos y bundles en disco (FileTree / DirectoryListing)
+    pub(crate) project_explorer_view: ProjectExplorerView,
+    pub(crate) discovered_bundles: Vec<jsondiff::ProjectBundleInfo>,
 
     // Foco global para captura de atajos
     pub(crate) focus_handle: FocusHandle,
@@ -293,6 +297,8 @@ impl DiffView {
             project_rename_input,
             _project_rename_sub: project_rename_sub,
             renaming_project_id: None,
+            project_explorer_view: ProjectExplorerView::FileTree,
+            discovered_bundles: Vec::new(),
             focus_handle: cx.focus_handle(),
             status_toast: None,
             cached_rows: std::sync::Arc::from([]),
@@ -301,6 +307,7 @@ impl DiffView {
             search_epoch: 0,
         };
 
+        this.refresh_discovered_bundles();
         this.reload();
         if let Some(c) = &mut this.comparison {
             c.set_diff_mode(initial_diff_mode);
@@ -309,5 +316,11 @@ impl DiffView {
             this.refilter();
         }
         this
+    }
+
+    /// Actualiza la lista de bundles descubiertos en el directorio de proyectos configurado.
+    pub(crate) fn refresh_discovered_bundles(&mut self) {
+        let dir = self.workspace.projects_dir();
+        self.discovered_bundles = jsondiff::scan_projects_bundles(&dir);
     }
 }

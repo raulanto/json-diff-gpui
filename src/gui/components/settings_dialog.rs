@@ -310,6 +310,9 @@ pub fn render_settings_dialog(
             let view_new_proj = view.clone();
             let view_export = view.clone();
             let view_import = view.clone();
+            let view_change_dir = view.clone();
+            let view_reset_dir = view.clone();
+            let view_save_bundle = view.clone();
 
             div()
                 .flex()
@@ -336,6 +339,68 @@ pub fn render_settings_dialog(
                                                 this.show_settings = false;
                                             });
                                         }),
+                                ),
+                        )
+                        .row(
+                            SettingsRow::new("Ubicación en disco de los proyectos")
+                                .description(format!(
+                                    "Directorio donde se almacenan los proyectos y sus archivos JSON: {}",
+                                    state.workspace.projects_dir().display()
+                                ))
+                                .control(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Button::new(
+                                                "btn_settings_change_projects_dir",
+                                                "Cambiar carpeta…",
+                                            )
+                                            .size(ControlSize::Sm)
+                                            .variant(ButtonVariant::Outline)
+                                            .icon(IconName::FolderPlus)
+                                            .on_click(move |_, window, cx| {
+                                                view_change_dir.update(cx, |this, cx| {
+                                                    this.choose_projects_dir(window, cx);
+                                                });
+                                            }),
+                                        )
+                                        .when(state.workspace.projects_dir.is_some(), |bar| {
+                                            bar.child(
+                                                IconButton::new(
+                                                    "btn_settings_reset_projects_dir",
+                                                    IconName::RotateCcw,
+                                                )
+                                                .size(ControlSize::Sm)
+                                                .tooltip("Restablecer a ubicación por defecto")
+                                                .on_click(move |_, _, cx| {
+                                                    view_reset_dir.update(cx, |this, cx| {
+                                                        this.reset_projects_dir(cx);
+                                                    });
+                                                }),
+                                            )
+                                        }),
+                                ),
+                        )
+                        .row(
+                            SettingsRow::new("Guardar proyecto activo con archivos JSON")
+                                .description(
+                                    "Crea una carpeta de proyecto en la ubicación configurada con project.json y todos sus archivos JSON.",
+                                )
+                                .control(
+                                    Button::new(
+                                        "btn_settings_save_bundle",
+                                        "Guardar Bundle",
+                                    )
+                                    .size(ControlSize::Sm)
+                                    .variant(ButtonVariant::Outline)
+                                    .icon(IconName::Save)
+                                    .on_click(move |_, window, cx| {
+                                        view_save_bundle.update(cx, |this, cx| {
+                                            this.save_current_project_bundle(window, cx);
+                                        });
+                                    }),
                                 ),
                         )
                         .row(

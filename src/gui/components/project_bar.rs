@@ -71,6 +71,7 @@ pub fn render_project_bar(
     let view_save = view.clone();
     let view_load = view.clone();
     let view_dup = view.clone();
+    let view_bundle = view.clone();
     let view_cmd = view.clone();
     let view_settings = view.clone();
 
@@ -138,6 +139,16 @@ pub fn render_project_bar(
                         .on_click(move |_, window, cx| {
                             view_dup.update(cx, |this, cx| {
                                 this.duplicate_current_project(window, cx);
+                            });
+                        }),
+                )
+                .child(
+                    IconButton::new("btn_save_bundle", IconName::FolderPlus)
+                        .size(ControlSize::Sm)
+                        .tooltip("Guardar proyecto con sus archivos JSON en disco…")
+                        .on_click(move |_, window, cx| {
+                            view_bundle.update(cx, |this, cx| {
+                                this.save_current_project_bundle(window, cx);
                             });
                         }),
                 )

@@ -147,6 +147,144 @@ impl Project {
         })?;
         Self::from_json(&content)
     }
+
+    /// Limpia un nombre de proyecto para que sea seguro como nombre de carpeta en cualquier sistema operativo.
+    pub fn sanitize_folder_name(name: &str) -> String {
+        let clean: String = name
+            .chars()
+            .map(|c| match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                other => other,
+            })
+            .collect();
+        let trimmed = clean.trim().trim_matches('.');
+        if trimmed.is_empty() {
+            "Proyecto_Sin_Nombre".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+
+    /// Guarda el proyecto como un bundle completo en su propia subcarpeta dentro de `projects_root`.
+    /// Escribe cada archivo JSON proporcionado en esa carpeta y actualiza `self.paths`.
+    /// Guarda también `project.json` en esa carpeta.
+    pub fn save_bundle(
+        &mut self,
+        projects_root: &Path,
+        files_content: &[(String, String)],
+    ) -> Result<PathBuf, String> {
+        let folder_name = Self::sanitize_folder_name(&self.name);
+        let project_dir = projects_root.join(folder_name);
+        fs::create_dir_all(&project_dir).map_err(|e| {
+            format!(
+                "Error al crear directorio para el proyecto '{}': {e}",
+                project_dir.display()
+            )
+        })?;
+
+        let mut new_paths = Vec::new();
+
+        // Guardar cada archivo JSON en la carpeta del proyecto
+        for (file_name, content) in files_content {
+            let safe_name = Path::new(file_name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("archivo.json");
+            let target_file = project_dir.join(safe_name);
+            fs::write(&target_file, content).map_err(|e| {
+                format!(
+                    "Error al guardar archivo JSON '{}': {e}",
+                    target_file.display()
+                )
+            })?;
+            new_paths.push(target_file);
+        }
+
+        if !new_paths.is_empty() {
+            self.paths = new_paths;
+        }
+
+        self.touch();
+        let manifest_path = project_dir.join("project.json");
+        self.save_to_file(&manifest_path)?;
+
+        Ok(project_dir)
+    }
+
+    /// Carga un proyecto desde un directorio de bundle.
+    /// Si existe `project.json`, lo deserializa y enlaza sus archivos JSON locales.
+    /// Si no existe `project.json` pero hay archivos `.json`, crea un nuevo proyecto con ellos.
+    pub fn load_bundle(project_dir: &Path) -> Result<Self, String> {
+        if !project_dir.is_dir() {
+            return Err(format!(
+                "La ruta '{}' no es un directorio válido",
+                project_dir.display()
+            ));
+        }
+
+        let manifest_path = project_dir.join("project.json");
+        if manifest_path.exists() {
+            let mut proj = Self::load_from_file(&manifest_path)?;
+            let mut verified_paths = Vec::new();
+            for p in &proj.paths {
+                if p.exists() {
+                    verified_paths.push(p.clone());
+                } else if let Some(file_name) = p.file_name() {
+                    let local_path = project_dir.join(file_name);
+                    if local_path.exists() {
+                        verified_paths.push(local_path);
+                    }
+                }
+            }
+            if !verified_paths.is_empty() {
+                proj.paths = verified_paths;
+            }
+            return Ok(proj);
+        }
+
+        // Buscar archivos .json en la carpeta si no hay project.json
+        let mut json_paths = Vec::new();
+        if let Ok(entries) = fs::read_dir(project_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                        if ext.eq_ignore_ascii_case("json")
+                            && path.file_name() != Some(std::ffi::OsStr::new("project.json"))
+                        {
+                            json_paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        if json_paths.is_empty() {
+            return Err(format!(
+                "No se encontraron archivos JSON en el directorio '{}'",
+                project_dir.display()
+            ));
+        }
+
+        json_paths.sort();
+        let folder_name = project_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Proyecto Importado");
+
+        Ok(Self::with_paths(folder_name, json_paths))
+    }
+}
+
+/// Información resumida de un proyecto guardado en disco con sus archivos JSON.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProjectBundleInfo {
+    pub id: String,
+    pub name: String,
+    pub folder_path: PathBuf,
+    pub json_files: Vec<PathBuf>,
+    pub total_size_bytes: u64,
+    pub updated_at: u64,
 }
 
 /// Espacio de trabajo que agrupa múltiples proyectos/pestañas de comparación.
@@ -156,6 +294,9 @@ pub struct Workspace {
     pub active_project_id: Option<String>,
     /// Lista de proyectos abiertos en pestañas (tabs).
     pub projects: Vec<Project>,
+    /// Directorio raíz personalizado para almacenamiento de proyectos en disco.
+    #[serde(default)]
+    pub projects_dir: Option<PathBuf>,
 }
 
 impl Default for Workspace {
@@ -170,6 +311,7 @@ impl Workspace {
         Self {
             active_project_id: None,
             projects: Vec::new(),
+            projects_dir: None,
         }
     }
 
@@ -180,7 +322,49 @@ impl Workspace {
         Self {
             active_project_id: Some(id),
             projects: vec![initial],
+            projects_dir: None,
         }
+    }
+
+    /// Obtiene la ruta del directorio de proyectos configurado o por defecto.
+    pub fn projects_dir(&self) -> PathBuf {
+        if let Some(dir) = &self.projects_dir {
+            dir.clone()
+        } else {
+            Self::default_projects_dir()
+        }
+    }
+
+    /// Establece un nuevo directorio raíz para los proyectos.
+    pub fn set_projects_dir(&mut self, dir: Option<PathBuf>) {
+        self.projects_dir = dir;
+    }
+
+    /// Obtiene la ruta predeterminada para el directorio de proyectos.
+    pub fn default_projects_dir() -> PathBuf {
+        if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+            if !config_home.trim().is_empty() {
+                return PathBuf::from(config_home)
+                    .join("json-diff-gpui")
+                    .join("projects");
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.trim().is_empty() {
+                return PathBuf::from(home)
+                    .join(".config")
+                    .join("json-diff-gpui")
+                    .join("projects");
+            }
+        }
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            if !app_data.trim().is_empty() {
+                return PathBuf::from(app_data)
+                    .join("json-diff-gpui")
+                    .join("projects");
+            }
+        }
+        PathBuf::from("projects")
     }
 
     /// Añade un proyecto al workspace, lo enfoca y devuelve su ID.
@@ -394,4 +578,98 @@ impl Workspace {
         serde_json::from_str(&content)
             .map_err(|e| format!("Error al parsear archivo de workspace JSON: {e}"))
     }
+}
+
+/// Escanea un directorio raíz de proyectos y devuelve la lista de bundles encontrados en disco.
+pub fn scan_projects_bundles(projects_root: &Path) -> Vec<ProjectBundleInfo> {
+    let mut results = Vec::new();
+    let Ok(entries) = fs::read_dir(projects_root) else {
+        return results;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let mut json_files = Vec::new();
+        let mut total_size: u64 = 0;
+        let mut max_modified: u64 = 0;
+        let mut project_name: Option<String> = None;
+        let mut project_id: Option<String> = None;
+
+        let manifest = path.join("project.json");
+        if manifest.exists() {
+            if let Ok(proj) = Project::load_from_file(&manifest) {
+                project_name = Some(proj.name);
+                project_id = Some(proj.id);
+                max_modified = proj.updated_at;
+            }
+        }
+
+        if let Ok(sub_entries) = fs::read_dir(&path) {
+            for sub_entry in sub_entries.flatten() {
+                let sub_path = sub_entry.path();
+                if sub_path.is_file() {
+                    if let Some(ext) = sub_path.extension().and_then(|s| s.to_str()) {
+                        if ext.eq_ignore_ascii_case("json") {
+                            if let Ok(meta) = sub_entry.metadata() {
+                                total_size += meta.len();
+                                if let Ok(time) = meta.modified() {
+                                    if let Ok(dur) = time.duration_since(std::time::UNIX_EPOCH) {
+                                        max_modified = max_modified.max(dur.as_secs());
+                                    }
+                                }
+                            }
+                            if sub_path.file_name() != Some(std::ffi::OsStr::new("project.json")) {
+                                json_files.push(sub_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !json_files.is_empty() || manifest.exists() {
+            json_files.sort();
+            let folder_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Proyecto")
+                .to_string();
+            let name = project_name.unwrap_or(folder_name);
+            let id = project_id.unwrap_or_else(|| format!("proj_disk_{}", max_modified));
+
+            results.push(ProjectBundleInfo {
+                id,
+                name,
+                folder_path: path,
+                json_files,
+                total_size_bytes: total_size,
+                updated_at: max_modified,
+            });
+        }
+    }
+
+    results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    results
+}
+
+/// Convierte la lista de bundles a rutas relativas formateadas para `FileTree` de Ely Components.
+/// Por ejemplo: `["Proyecto 1/v1.json", "Proyecto 1/v2.json", "Proyecto 2/datos.json"]`.
+pub fn bundles_to_file_tree_paths(bundles: &[ProjectBundleInfo]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for b in bundles {
+        if b.json_files.is_empty() {
+            paths.push(format!("{}/project.json", b.name));
+        } else {
+            for f in &b.json_files {
+                if let Some(file_name) = f.file_name().and_then(|n| n.to_str()) {
+                    paths.push(format!("{}/{}", b.name, file_name));
+                }
+            }
+        }
+    }
+    paths
 }

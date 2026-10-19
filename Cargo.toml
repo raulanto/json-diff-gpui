@@ -21,6 +21,7 @@ gui = ["dep:gpui", "dep:gpui_platform", "dep:ely-gpui-component"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+jiff = "0.2"
 ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components", optional = true }
 gpui = { package = "gpui-pre", version = "=0.3.8", optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
