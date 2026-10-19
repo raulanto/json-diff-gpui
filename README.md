@@ -21,12 +21,16 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
 - **Selector de archivo base dinámico**: cambia el archivo base con un clic en «Hacer base» en la columna que desees o selecciónalo para contrastar en el Diff Git.
 - **Búsqueda en tiempo real**: filtra campos o valores al instante mediante el campo de búsqueda integrado en la tabla.
 - **Copiar al portapapeles y exportar**: copia la ruta del campo o valores individuales al portapapeles, o exporta el reporte tabular a Markdown.
+- **Densidad de visualización ajustable**:
+  - Modo **Compacto** (predeterminado) que reduce la altura de filas a 26px, optimiza paddings y gutters numéricos alineados a 32px para visualizar ~40% más datos por pantalla sin sacrificar ningún detalle o legibilidad.
+  - Modo **Cómodo** (36px por fila) con espaciado generoso.
+  - Alternable al vuelo con `Ctrl+D`, desde el botón en la barra superior, en la paleta de comandos o en los ajustes.
 - **Paleta de Comandos Rápida (`CommandPalette`)**:
   - Accede a cualquier acción, vista o comando con `Ctrl+K` / `Cmd+K` (o mediante el botón en el toolbar y pantalla principal).
   - Búsqueda difusa (fuzzy search) en tiempo real con resaltado de coincidencias y navegación por teclado.
 - **Configuración de la Aplicación (`Dialog` + `Settings`)**:
   - Modal estilizado con componentes de Ely (`Dialog`, `SettingsSection`, `SettingsRow`) accesible con `Ctrl+,` / `Cmd+,` o el botón de engranaje.
-  - Permite configurar tema visual (Oscuro / Claro), modo de comparación por defecto (Base fija vs En cadena), filtro de visualización inicial y selector de subestructuras.
+  - Permite configurar tema visual (Oscuro / Claro), densidad de la tabla (Compacta / Cómoda), modo de comparación por defecto (Base fija vs En cadena), filtro de visualización inicial y selector de subestructuras.
   - Pestaña con catálogo interactivo de atajos de teclado (`KeyboardShortcutsList`) con buscador en tiempo real.
 - **Atajos de Teclado Globales**:
   - `Ctrl+K` / `Ctrl+P`: Abrir/cerrar paleta de comandos
@@ -34,6 +38,7 @@ Pensada para los respaldos de guardado de solicitudes (`*_promotor_enviado_*.jso
   - `Ctrl+O`: Abrir diálogo para seleccionar archivos JSON
   - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`: Alternar entre Vista Tabla, Diff Git y Editor
   - `Ctrl+M`: Alternar modo de comparación (Base fija ↔ En cadena)
+  - `Ctrl+D`: Alternar densidad de la tabla (Compacta ↔ Cómoda)
   - `Ctrl+Shift+C`: Alternar filtro (Solo cambios ↔ Ver todos)
   - `Ctrl+Shift+M`: Copiar reporte Markdown al portapapeles
   - `Ctrl+Shift+L`: Limpiar todos los archivos cargados

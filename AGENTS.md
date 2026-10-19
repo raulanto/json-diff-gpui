@@ -20,12 +20,12 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `export_markdown` y `export_csv` generan reportes tabulares estructurados.
   - `text_report` alimenta el modo `--cli`.
 - `src/gui.rs`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Integra:
-  - Vista Tabla (Matriz virtualizada con `uniform_list`, selector de estructura JSONPath reactivo con botón de restauración a `$`, celdas enriquecidas con `Badge`, gutter de líneas, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
+  - Vista Tabla (Matriz virtualizada con `uniform_list`, selector de estructura JSONPath reactivo con botón de restauración a `$`, selector dinámico de densidad Compacta / Cómoda con filas optimizadas de 26px/36px, celdas enriquecidas con micro-badges, gutter de líneas alineado a 32px, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
   - Vista Diff Git (`DiffViewer` en modo Unified y Split con estadísticas `DiffStat`).
   - Vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
   - Paleta de Comandos (`CommandPalette` de Ely con búsqueda difusa, navegación por flechas y ejecución con Enter).
   - Modal de Configuración (`Dialog`, `SettingsSection`, `SettingsRow` y `KeyboardShortcutsList` con catálogo reactivo de atajos).
-  - Atajos de teclado globales (`capture_key_down` con `Ctrl+K`, `Ctrl+,`, `Ctrl+O`, `Ctrl+1..3`, `Ctrl+M`, `Ctrl+Shift+C`, `Ctrl+Shift+M`, `Ctrl+Shift+I`, `Ctrl+S`, `Ctrl+T`, `Esc`).
+  - Atajos de teclado globales (`capture_key_down` con `Ctrl+K`, `Ctrl+,`, `Ctrl+O`, `Ctrl+1..3`, `Ctrl+M`, `Ctrl+D`, `Ctrl+Shift+C`, `Ctrl+Shift+M`, `Ctrl+Shift+I`, `Ctrl+S`, `Ctrl+T`, `Esc`).
 - `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI (soporta `-s|--selector <QUERY>`).
 
 Regla: cualquier cambio de comportamiento se implementa en `lib.rs` con prueba; la UI solo lo consume.
@@ -61,7 +61,7 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 
 - Español en textos de interfaz, mensajes de error y documentación; identificadores en inglés.
 - Sin `unwrap()` en rutas de usuario (carga de archivos): devolver `Result<_, String>` con mensaje claro.
-- Mantener el diseño de la tabla: filas de alto fijo (`ROW_H`) por `uniform_list`; no usar listas no virtualizadas para archivos grandes.
+- Mantener el diseño de la tabla: filas de alto fijo (`row_h` según `Density`, 26px en Compacto y 36px en Cómodo) por `uniform_list`; no usar listas no virtualizadas para archivos grandes.
 - Ejecutar `cargo fmt` y `cargo test --no-default-features` antes de entregar cambios.
 
 ## Ideas pendientes
@@ -74,4 +74,5 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 - [x] Lenguaje selector JSONPath (`$.data`, `$.items[*]`, `$..id`, unión `,`) para extraer y enfocar subestructuras concretas.
 - [x] Paleta de comandos interactiva (`CommandPalette`) con búsqueda fuzzy y atajos de teclado globales.
 - [x] Modal de Configuración de la aplicación (`Dialog` con secciones generales y catálogo reactivo de atajos).
+- [x] Modo de visualización compacto / densidad configurable (`Ctrl+D`, botón en toolbar y ajustes) con ~40% más filas visibles.
 - [ ] Comparar arreglos por clave (p. ej. por `id`) en vez de por índice.

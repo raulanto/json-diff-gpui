@@ -38,8 +38,39 @@ use jsondiff::{
 use std::ops::Range;
 use std::path::PathBuf;
 
-const ROW_H: f32 = 38.0;
-const PATH_W: f32 = 320.0;
+/// Densidad de visualización para la tabla matricial de diferencias.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Density {
+    #[default]
+    Compact,
+    Comfortable,
+}
+
+impl Density {
+    #[inline]
+    pub fn row_height(self) -> f32 {
+        match self {
+            Density::Compact => 26.0,
+            Density::Comfortable => 36.0,
+        }
+    }
+
+    #[inline]
+    pub fn header_height(self) -> f32 {
+        match self {
+            Density::Compact => 32.0,
+            Density::Comfortable => 42.0,
+        }
+    }
+
+    #[inline]
+    pub fn path_width(self) -> f32 {
+        match self {
+            Density::Compact => 260.0,
+            Density::Comfortable => 320.0,
+        }
+    }
+}
 
 /// Modos de visualización integrados.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +92,9 @@ pub struct DiffView {
     comparison: Option<Comparison>,
     error: Option<SharedString>,
     view_mode: ViewMode,
+
+    // Densidad visual (Compacta o Cómoda)
+    density: Density,
 
     // Estado para vista Tabla
     only_changed: bool,
@@ -171,6 +205,7 @@ impl DiffView {
             comparison: None,
             error: None,
             view_mode: ViewMode::Table,
+            density: Density::Compact,
             only_changed: true,
             search_query: String::new(),
             search_input,
@@ -547,6 +582,22 @@ impl DiffView {
         self.show_toast(format!("Guardado exitosamente en {}", name), cx);
     }
 
+    /// Alterna la densidad visual de la tabla matricial entre Compacta y Cómoda.
+    pub fn toggle_density(&mut self, cx: &mut Context<Self>) {
+        self.density = match self.density {
+            Density::Compact => Density::Comfortable,
+            Density::Comfortable => Density::Compact,
+        };
+        self.show_toast(
+            match self.density {
+                Density::Compact => "Densidad: Compacta (más información y filas en pantalla)",
+                Density::Comfortable => "Densidad: Cómoda",
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
     /// Lista exhaustiva de atajos de teclado registrados en la aplicación.
     pub fn shortcuts_list() -> Vec<Shortcut> {
         vec![
@@ -584,6 +635,11 @@ impl DiffView {
                 group: "Vistas".into(),
                 name: "Ver: Editor en vivo".into(),
                 keys: "secondary-3".into(),
+            },
+            Shortcut {
+                group: "Visualización & Densidad".into(),
+                name: "Alternar densidad: Compacta / Cómoda".into(),
+                keys: "secondary-d".into(),
             },
             Shortcut {
                 group: "Comparación y Filtros".into(),
@@ -629,6 +685,17 @@ impl DiffView {
         match action {
             "open_files" => self.pick_files(cx),
             "clear_files" => self.clear_files(cx),
+            "toggle_density" => self.toggle_density(cx),
+            "density_compact" => {
+                self.density = Density::Compact;
+                self.show_toast("Densidad: Compacta (más datos en pantalla)", cx);
+                cx.notify();
+            }
+            "density_comfortable" => {
+                self.density = Density::Comfortable;
+                self.show_toast("Densidad: Cómoda", cx);
+                cx.notify();
+            }
             "view_table" => {
                 self.view_mode = ViewMode::Table;
                 self.editor = None;
@@ -812,6 +879,11 @@ impl DiffView {
                         cx.notify();
                         return true;
                     }
+                    // Alternar densidad de tabla: Ctrl+D
+                    "d" => {
+                        self.toggle_density(cx);
+                        return true;
+                    }
                     // Alternar modo diff: Ctrl+M
                     "m" => {
                         if let Some(c) = &mut self.comparison {
@@ -969,6 +1041,21 @@ impl DiffView {
             ],
         )
         .group(
+            "Visualización y Densidad",
+            vec![
+                Command::new(
+                    "toggle_density",
+                    "Alternar densidad de tabla (Compacta / Cómoda)",
+                )
+                .icon(IconName::Rows2)
+                .keys("secondary-d"),
+                Command::new("density_compact", "Densidad de tabla: Modo compacto")
+                    .icon(IconName::Minimize2),
+                Command::new("density_comfortable", "Densidad de tabla: Modo cómodo")
+                    .icon(IconName::Maximize2),
+            ],
+        )
+        .group(
             "Editor de Código",
             vec![
                 Command::new("format_json", "Formatear JSON (2 espacios)")
@@ -1026,6 +1113,7 @@ impl DiffView {
                 let view1 = view.clone();
                 let view2 = view.clone();
                 let view3 = view.clone();
+                let view_density = view.clone();
 
                 div()
                     .flex()
@@ -1033,7 +1121,7 @@ impl DiffView {
                     .gap_4()
                     .child(
                         SettingsSection::new("Apariencia y Visualización")
-                            .description("Personaliza el tema visual y la paleta de colores de Ely.")
+                            .description("Personaliza el tema visual, tamaño y densidad de filas.")
                             .row(
                                 SettingsRow::new("Tema de la interfaz")
                                     .description("Alterna entre tema oscuro moderno o tema claro de alto contraste.")
@@ -1050,6 +1138,33 @@ impl DiffView {
                                                 };
                                                 Theme::set_mode(mode, cx);
                                             }),
+                                    ),
+                            )
+                            .row(
+                                SettingsRow::new("Densidad de la tabla")
+                                    .description("Ajusta el espaciado de filas para visualizar muchas más líneas simultáneas (Ctrl+D).")
+                                    .control(
+                                        SegmentedControl::new(
+                                            "settings_density",
+                                            match self.density {
+                                                Density::Compact => "compact",
+                                                Density::Comfortable => "comfortable",
+                                            },
+                                        )
+                                        .size(ControlSize::Sm)
+                                        .segment("compact", "Compacta", Some(IconName::Minimize2))
+                                        .segment("comfortable", "Cómoda", Some(IconName::Maximize2))
+                                        .on_change(move |val, _, cx| {
+                                            let density = if val.as_ref() == "comfortable" {
+                                                Density::Comfortable
+                                            } else {
+                                                Density::Compact
+                                            };
+                                            view_density.update(cx, |this, cx| {
+                                                this.density = density;
+                                                cx.notify();
+                                            });
+                                        }),
                                     ),
                             ),
                     )
@@ -1236,8 +1351,9 @@ impl gpui::Render for DiffView {
             .flex_row()
             .items_center()
             .justify_between()
-            .gap_3()
-            .p_3()
+            .gap_2p5()
+            .px_3()
+            .py_2()
             .bg(colors.surface)
             .border_b_1()
             .border_color(colors.border)
@@ -1423,7 +1539,8 @@ impl gpui::Render for DiffView {
                             let c = self.comparison.as_ref().unwrap();
                             let diff_count = c.changed_count();
                             let total = c.rows.len();
-                            let view = view.clone();
+                            let view_md = view.clone();
+                            let view_density = view.clone();
                             el.child(
                                 Badge::new(format!("{diff_count} de {total} con diferencias"))
                                     .tone(if diff_count > 0 {
@@ -1439,7 +1556,7 @@ impl gpui::Render for DiffView {
                                     .variant(ButtonVariant::Outline)
                                     .icon(IconName::Copy)
                                     .on_click(move |_, _, cx| {
-                                        view.update(cx, |this, cx| {
+                                        view_md.update(cx, |this, cx| {
                                             if let Some(c) = &this.comparison {
                                                 let md = export_markdown(c, this.only_changed);
                                                 cx.write_to_clipboard(ClipboardItem::new_string(
@@ -1452,6 +1569,25 @@ impl gpui::Render for DiffView {
                                             }
                                         });
                                     }),
+                            )
+                            .child(
+                                IconButton::new(
+                                    "density_btn",
+                                    if self.density == Density::Compact {
+                                        IconName::Rows2
+                                    } else {
+                                        IconName::Minimize2
+                                    },
+                                )
+                                .size(ControlSize::Sm)
+                                .tooltip(if self.density == Density::Compact {
+                                    "Cambiar a densidad cómoda (Ctrl+D)"
+                                } else {
+                                    "Cambiar a densidad compacta (Ctrl+D)"
+                                })
+                                .on_click(move |_, _, cx| {
+                                    view_density.update(cx, |this, cx| this.toggle_density(cx));
+                                }),
                             )
                         },
                     )
@@ -1536,12 +1672,16 @@ impl gpui::Render for DiffView {
                     let diff_mode = c.diff_mode;
                     let files_count = c.files.len();
 
+                    let row_h = self.density.row_height();
+                    let header_h = self.density.header_height();
+                    let path_w = self.density.path_width();
+
                     // Encabezado de columnas
                     let mut header = div()
                         .flex()
                         .flex_row()
                         .w_full()
-                        .h(px(ROW_H + 8.0))
+                        .h(px(header_h))
                         .items_center()
                         .bg(colors.sunken)
                         .border_b_1()
@@ -1549,9 +1689,9 @@ impl gpui::Render for DiffView {
                         .text_color(colors.fg_muted)
                         .child(
                             div()
-                                .w(px(PATH_W))
+                                .w(px(path_w))
                                 .flex_none()
-                                .px_3()
+                                .px_2p5()
                                 .flex()
                                 .flex_row()
                                 .items_center()
@@ -1559,11 +1699,24 @@ impl gpui::Render for DiffView {
                                 .child(
                                     div()
                                         .font_weight(FontWeight::SEMIBOLD)
+                                        .text_size(theme.text_size(TextSize::Xs))
                                         .child("Campo / Ruta JSON"),
                                 )
                                 .when(c.selector != "$", |el| {
                                     el.child(
-                                        Badge::new(c.selector.clone()).tone(Tone::Accent).dot(),
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap_1()
+                                            .px_1p5()
+                                            .py(px(0.5))
+                                            .rounded(theme.radius(Radius::Sm))
+                                            .bg(colors.accent.opacity(0.18))
+                                            .text_color(colors.accent)
+                                            .text_size(theme.text_size(TextSize::Xs))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child(c.selector.clone()),
                                     )
                                 }),
                         );
@@ -1628,41 +1781,107 @@ impl gpui::Render for DiffView {
                             );
                         }
 
-                        let role_badge = match diff_mode {
+                        let role_badge: gpui::AnyElement = match diff_mode {
                             DiffMode::FixedBase => {
                                 if is_base {
-                                    div().child(Badge::new("Base").tone(Tone::Accent).dot())
+                                    div()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap_1()
+                                                .px_1p5()
+                                                .py(px(0.5))
+                                                .rounded(theme.radius(Radius::Sm))
+                                                .bg(colors.accent.opacity(0.18))
+                                                .text_color(colors.accent)
+                                                .text_size(theme.text_size(TextSize::Xs))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child(
+                                                    div()
+                                                        .w(px(5.0))
+                                                        .h(px(5.0))
+                                                        .rounded_full()
+                                                        .bg(colors.accent),
+                                                )
+                                                .child("Base"),
+                                        )
+                                        .into_any_element()
                                 } else {
                                     let view = view.clone();
-                                    div().child(
-                                        Button::new(("set_base", i), "Hacer base")
-                                            .size(ControlSize::Sm)
-                                            .variant(ButtonVariant::Ghost)
-                                            .on_click(move |_, _, cx| {
-                                                view.update(cx, |this, cx| {
-                                                    if let Some(c) = &mut this.comparison {
-                                                        if c.set_base_index(i).is_ok() {
-                                                            this.refilter();
-                                                            this.show_toast(
-                                                                format!(
-                                                                    "Archivo [{}] ahora es la base",
-                                                                    i + 1
-                                                                ),
-                                                                cx,
-                                                            );
-                                                            cx.notify();
+                                    div()
+                                        .id(("set_base_tip", i))
+                                        .tooltip(Tooltip::text("Establecer este archivo como base"))
+                                        .child(
+                                            Button::new(("set_base", i), "Hacer base")
+                                                .size(ControlSize::Sm)
+                                                .variant(ButtonVariant::Ghost)
+                                                .on_click(move |_, _, cx| {
+                                                    view.update(cx, |this, cx| {
+                                                        if let Some(c) = &mut this.comparison {
+                                                            if c.set_base_index(i).is_ok() {
+                                                                this.refilter();
+                                                                this.show_toast(
+                                                                    format!(
+                                                                        "Archivo [{}] ahora es la base",
+                                                                        i + 1
+                                                                    ),
+                                                                    cx,
+                                                                );
+                                                                cx.notify();
+                                                            }
                                                         }
-                                                    }
-                                                });
-                                            }),
-                                    )
+                                                    });
+                                                }),
+                                        )
+                                        .into_any_element()
                                 }
                             }
                             DiffMode::Sequential => {
                                 if i == 0 {
-                                    div().child(Badge::new("Origen").tone(Tone::Accent).dot())
+                                    div()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap_1()
+                                                .px_1p5()
+                                                .py(px(0.5))
+                                                .rounded(theme.radius(Radius::Sm))
+                                                .bg(colors.accent.opacity(0.18))
+                                                .text_color(colors.accent)
+                                                .text_size(theme.text_size(TextSize::Xs))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child(
+                                                    div()
+                                                        .w(px(5.0))
+                                                        .h(px(5.0))
+                                                        .rounded_full()
+                                                        .bg(colors.accent),
+                                                )
+                                                .child("Origen"),
+                                        )
+                                        .into_any_element()
                                 } else {
-                                    div().child(Badge::new(format!("vs [{}]", i)).tone(Tone::Info))
+                                    div()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap_1()
+                                                .px_1p5()
+                                                .py(px(0.5))
+                                                .rounded(theme.radius(Radius::Sm))
+                                                .bg(colors.info.opacity(0.15))
+                                                .text_color(colors.info)
+                                                .text_size(theme.text_size(TextSize::Xs))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .child(format!("vs [{}]", i)),
+                                        )
+                                        .into_any_element()
                                 }
                             }
                         };
@@ -1670,12 +1889,12 @@ impl gpui::Render for DiffView {
                         let col_header = div()
                             .flex_1()
                             .min_w_0()
-                            .px_3()
+                            .px_2()
                             .flex()
                             .flex_row()
                             .items_center()
                             .justify_between()
-                            .gap_2()
+                            .gap_1p5()
                             .child(
                                 div()
                                     .id(("col_title", i))
@@ -1684,6 +1903,7 @@ impl gpui::Render for DiffView {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
+                                    .text_size(theme.text_size(TextSize::Xs))
                                     .font_weight(if is_base {
                                         FontWeight::BOLD
                                     } else {
@@ -1730,16 +1950,16 @@ impl gpui::Render for DiffView {
                                         .flex()
                                         .flex_row()
                                         .w_full()
-                                        .h(px(ROW_H))
+                                        .h(px(row_h))
                                         .items_center()
                                         .border_b_1()
-                                        .border_color(colors.border.opacity(0.5))
+                                        .border_color(colors.border.opacity(0.35))
                                         .bg(if is_diff {
                                             colors.warning.opacity(0.04)
                                         } else {
                                             colors.surface
                                         })
-                                        .hover(|s| s.bg(colors.hover.opacity(0.5)));
+                                        .hover(|s| s.bg(colors.hover.opacity(0.45)));
 
                                     // Columna de ruta
                                     let path_str = row.path.clone();
@@ -1753,15 +1973,18 @@ impl gpui::Render for DiffView {
 
                                     let path_cell = div()
                                         .id(("path_cell", row_idx))
-                                        .w(px(PATH_W))
+                                        .w(px(path_w))
                                         .flex_none()
-                                        .px_3()
+                                        .px_2p5()
                                         .flex()
                                         .flex_row()
                                         .items_center()
-                                        .gap_2()
+                                        .gap_1p5()
                                         .cursor_pointer()
-                                        .tooltip(Tooltip::text("Clic para copiar ruta"))
+                                        .tooltip(Tooltip::text(format!(
+                                            "Ruta: {}\nClic para copiar",
+                                            copy_path
+                                        )))
                                         .on_click({
                                             let view = list_view.clone();
                                             move |_, _, cx| {
@@ -1779,8 +2002,8 @@ impl gpui::Render for DiffView {
                                         .child(
                                             div()
                                                 .flex_none()
-                                                .w(px(7.0))
-                                                .h(px(7.0))
+                                                .w(px(5.0))
+                                                .h(px(5.0))
                                                 .rounded_full()
                                                 .bg(if is_diff {
                                                     colors.warning
@@ -1807,15 +2030,16 @@ impl gpui::Render for DiffView {
                                                 .child(
                                                     div()
                                                         .font_weight(if is_diff {
-                                                            FontWeight::BOLD
+                                                            FontWeight::SEMIBOLD
                                                         } else {
-                                                            FontWeight::MEDIUM
+                                                            FontWeight::NORMAL
                                                         })
                                                         .text_color(if is_diff {
                                                             colors.fg
                                                         } else {
                                                             colors.fg_muted
                                                         })
+                                                        .text_size(theme.text_size(TextSize::Xs))
                                                         .child(leaf_name.to_string()),
                                                 ),
                                         );
@@ -1911,38 +2135,94 @@ impl gpui::Render for DiffView {
                                                 .flex()
                                                 .flex_row()
                                                 .items_center()
-                                                .gap_1p5()
+                                                .gap_1()
                                                 .min_w_0()
                                                 .overflow_hidden();
 
                                             if is_new_field {
-                                                val_content = val_content
-                                                    .child(Badge::new("+ Nuevo").tone(Tone::Success).dot());
+                                                val_content = val_content.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .flex()
+                                                        .flex_row()
+                                                        .items_center()
+                                                        .gap_1()
+                                                        .px_1()
+                                                        .py(px(0.5))
+                                                        .rounded(theme.radius(Radius::Sm))
+                                                        .bg(colors.success.opacity(0.15))
+                                                        .text_color(colors.success)
+                                                        .text_size(theme.text_size(TextSize::Xs))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .child(
+                                                            div()
+                                                                .w(px(4.0))
+                                                                .h(px(4.0))
+                                                                .rounded_full()
+                                                                .bg(colors.success),
+                                                        )
+                                                        .child("+ Nuevo"),
+                                                );
                                             }
 
                                             if type_changed {
-                                                val_content = val_content
-                                                    .child(Badge::new("≠ Tipo").tone(Tone::Warning));
+                                                val_content = val_content.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .px_1()
+                                                        .py(px(0.5))
+                                                        .rounded(theme.radius(Radius::Sm))
+                                                        .bg(colors.warning.opacity(0.18))
+                                                        .text_color(colors.warning)
+                                                        .text_size(theme.text_size(TextSize::Xs))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .child("≠ Tipo"),
+                                                );
                                             }
 
                                             match jtype {
                                                 JsonType::Boolean => {
-                                                    let tone = if val_str == "true" {
-                                                        Tone::Success
-                                                    } else {
-                                                        Tone::Warning
-                                                    };
-                                                    val_content = val_content
-                                                        .child(Badge::new(val_str.clone()).tone(tone));
+                                                    let is_true = val_str == "true";
+                                                    val_content = val_content.child(
+                                                        div()
+                                                            .flex_none()
+                                                            .px_1()
+                                                            .py(px(0.5))
+                                                            .rounded(theme.radius(Radius::Sm))
+                                                            .bg(if is_true {
+                                                                colors.success.opacity(0.15)
+                                                            } else {
+                                                                colors.warning.opacity(0.15)
+                                                            })
+                                                            .text_color(if is_true {
+                                                                colors.success
+                                                            } else {
+                                                                colors.warning
+                                                            })
+                                                            .text_size(theme.text_size(TextSize::Xs))
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .child(val_str.clone()),
+                                                    );
                                                 }
                                                 JsonType::Null => {
-                                                    val_content = val_content
-                                                        .child(Badge::new("null").tone(Tone::Neutral));
+                                                    val_content = val_content.child(
+                                                        div()
+                                                            .flex_none()
+                                                            .px_1()
+                                                            .py(px(0.5))
+                                                            .rounded(theme.radius(Radius::Sm))
+                                                            .bg(colors.sunken)
+                                                            .text_color(colors.fg_subtle)
+                                                            .text_size(theme.text_size(TextSize::Xs))
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .child("null"),
+                                                    );
                                                 }
                                                 JsonType::Number => {
                                                     val_content = val_content.child(
                                                         div()
                                                             .font_weight(FontWeight::MEDIUM)
+                                                            .text_size(theme.text_size(TextSize::Xs))
                                                             .text_color(if differs_from_ref {
                                                                 colors.warning
                                                             } else if is_base {
@@ -1959,6 +2239,7 @@ impl gpui::Render for DiffView {
                                                             .overflow_hidden()
                                                             .whitespace_nowrap()
                                                             .text_ellipsis()
+                                                            .text_size(theme.text_size(TextSize::Xs))
                                                             .font_weight(if differs_from_ref {
                                                                 FontWeight::MEDIUM
                                                             } else {
@@ -1979,12 +2260,24 @@ impl gpui::Render for DiffView {
                                                         "{}"
                                                     };
                                                     val_content = val_content
-                                                        .child(Badge::new(tag).tone(Tone::Info))
+                                                        .child(
+                                                            div()
+                                                                .flex_none()
+                                                                .px_1()
+                                                                .py(px(0.5))
+                                                                .rounded(theme.radius(Radius::Sm))
+                                                                .bg(colors.accent.opacity(0.12))
+                                                                .text_color(colors.accent)
+                                                                .text_size(theme.text_size(TextSize::Xs))
+                                                                .font_weight(FontWeight::MEDIUM)
+                                                                .child(tag),
+                                                        )
                                                         .child(
                                                             div()
                                                                 .overflow_hidden()
                                                                 .whitespace_nowrap()
                                                                 .text_ellipsis()
+                                                                .text_size(theme.text_size(TextSize::Xs))
                                                                 .text_color(colors.fg_muted)
                                                                 .child(val_str.clone()),
                                                         );
@@ -1995,6 +2288,7 @@ impl gpui::Render for DiffView {
                                                             .overflow_hidden()
                                                             .whitespace_nowrap()
                                                             .text_ellipsis()
+                                                            .text_size(theme.text_size(TextSize::Xs))
                                                             .text_color(if differs_from_ref {
                                                                 colors.fg
                                                             } else {
@@ -2009,13 +2303,13 @@ impl gpui::Render for DiffView {
                                                 .id(("val_cell", row_idx * 10 + file_col))
                                                 .flex_1()
                                                 .min_w_0()
-                                                .h(px(ROW_H - 6.0))
-                                                .mx_1()
-                                                .px_2()
+                                                .h(px(row_h - 2.0))
+                                                .mx(px(2.0))
+                                                .px_1p5()
                                                 .flex()
                                                 .flex_row()
                                                 .items_center()
-                                                .gap_2()
+                                                .gap_1p5()
                                                 .cursor_pointer()
                                                 .rounded(theme.radius(Radius::Sm))
                                                 .tooltip(Tooltip::text(tooltip_msg))
@@ -2052,10 +2346,11 @@ impl gpui::Render for DiffView {
                                                 .child(
                                                     div()
                                                         .flex_none()
-                                                        .px_1p5()
-                                                        .py(px(1.0))
-                                                        .rounded(theme.radius(Radius::Sm))
-                                                        .bg(colors.sunken)
+                                                        .w(px(32.0))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_end()
+                                                        .pr_1()
                                                         .text_size(theme.text_size(TextSize::Xs))
                                                         .text_color(colors.fg_subtle)
                                                         .child(line_info),
@@ -2067,12 +2362,13 @@ impl gpui::Render for DiffView {
                                                     .id(("val_cell_empty", row_idx * 10 + file_col))
                                                     .flex_1()
                                                     .min_w_0()
-                                                    .h(px(ROW_H - 6.0))
-                                                    .mx_1()
-                                                    .px_2()
+                                                    .h(px(row_h - 2.0))
+                                                    .mx(px(2.0))
+                                                    .px_1p5()
                                                     .flex()
                                                     .flex_row()
                                                     .items_center()
+                                                    .gap_1p5()
                                                     .rounded(theme.radius(Radius::Sm))
                                                     .bg(colors.danger.opacity(0.08))
                                                     .border_1()
@@ -2082,23 +2378,71 @@ impl gpui::Render for DiffView {
                                                         ref_label
                                                     )))
                                                     .child(
-                                                        Badge::new("Ausente")
-                                                            .tone(Tone::Danger)
-                                                            .dot(),
+                                                        div()
+                                                            .flex_none()
+                                                            .w(px(32.0))
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_end()
+                                                            .pr_1()
+                                                            .text_size(theme.text_size(TextSize::Xs))
+                                                            .text_color(colors.fg_subtle)
+                                                            .child("-"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_row()
+                                                            .items_center()
+                                                            .gap_1()
+                                                            .px_1()
+                                                            .py(px(0.5))
+                                                            .rounded(theme.radius(Radius::Sm))
+                                                            .bg(colors.danger.opacity(0.15))
+                                                            .text_color(colors.danger)
+                                                            .text_size(theme.text_size(TextSize::Xs))
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .child(
+                                                                div()
+                                                                    .w(px(4.0))
+                                                                    .h(px(4.0))
+                                                                    .rounded_full()
+                                                                    .bg(colors.danger),
+                                                            )
+                                                            .child("Ausente"),
                                                     )
                                             } else {
                                                 div()
                                                     .id(("val_cell_empty", row_idx * 10 + file_col))
                                                     .flex_1()
                                                     .min_w_0()
-                                                    .h(px(ROW_H - 6.0))
-                                                    .mx_1()
-                                                    .px_2()
+                                                    .h(px(row_h - 2.0))
+                                                    .mx(px(2.0))
+                                                    .px_1p5()
                                                     .flex()
                                                     .flex_row()
                                                     .items_center()
+                                                    .gap_1p5()
                                                     .tooltip(Tooltip::text("Campo ausente"))
-                                                    .child(Badge::new("∅").tone(Tone::Neutral))
+                                                    .child(
+                                                        div()
+                                                            .flex_none()
+                                                            .w(px(32.0))
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_end()
+                                                            .pr_1()
+                                                            .text_size(theme.text_size(TextSize::Xs))
+                                                            .text_color(colors.fg_subtle)
+                                                            .child("-"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex_none()
+                                                            .text_color(colors.fg_subtle)
+                                                            .text_size(theme.text_size(TextSize::Xs))
+                                                            .child("∅"),
+                                                    )
                                             }
                                         };
 
@@ -2594,6 +2938,16 @@ impl gpui::Render for DiffView {
                                         .text_color(colors.fg_muted)
                                         .child("Abrir:")
                                         .child(KbdCombo::new("secondary-o")),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .text_size(theme.text_size(TextSize::Xs))
+                                        .text_color(colors.fg_muted)
+                                        .child("Densidad:")
+                                        .child(KbdCombo::new("secondary-d")),
                                 )
                                 .child(
                                     div()
