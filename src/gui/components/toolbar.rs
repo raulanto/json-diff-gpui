@@ -46,11 +46,20 @@ pub fn render_toolbar(
                         .icon(IconName::FolderOpen)
                         .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
                 )
+                .when(!state.paths.is_empty() && state.paths.len() < jsondiff::MAX_FILES, |bar| {
+                    bar.child(
+                        Button::new("add_files", "Agregar JSON…")
+                            .size(ControlSize::Sm)
+                            .variant(ButtonVariant::Outline)
+                            .icon(IconName::FolderPlus)
+                            .on_click(cx.listener(|this, _, _, cx| this.pick_more_files(cx))),
+                    )
+                })
                 .when(!state.paths.is_empty(), |bar| {
                     bar.child(
                         Button::new("clear_files", "Limpiar")
                             .size(ControlSize::Sm)
-                            .variant(ButtonVariant::Outline)
+                            .variant(ButtonVariant::Ghost)
                             .icon(IconName::Trash2)
                             .on_click(cx.listener(|this, _, _, cx| this.clear_files(cx))),
                     )

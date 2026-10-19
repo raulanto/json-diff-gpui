@@ -80,4 +80,5 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 - [x] Paleta de comandos interactiva (`CommandPalette`) con búsqueda fuzzy y atajos de teclado globales.
 - [x] Modal de Configuración de la aplicación (`Dialog` con secciones generales y catálogo reactivo de atajos).
 - [x] Modo de visualización compacto / densidad configurable (`Ctrl+D`, botón en toolbar y ajustes) con ~40% más filas visibles.
+- [x] Carga incremental y gestión de archivos (agregar hasta 10 JSON en cualquier momento desde toolbar, drag & drop, atajo `Ctrl+Shift+O` y modal de Configuración sin perder los archivos previos).
 - [ ] Comparar arreglos por clave (p. ej. por `id`) en vez de por índice.

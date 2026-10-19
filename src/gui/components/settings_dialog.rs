@@ -4,7 +4,7 @@ use crate::gui::shortcuts::shortcuts_list;
 use crate::gui::types::{Density, SettingsTab};
 use crate::gui::DiffView;
 use ely_gpui_component::{
-    buttons::{Button, ButtonVariant, SegmentedControl},
+    buttons::{Button, ButtonVariant, IconButton, SegmentedControl},
     data_display::{Badge, Tone},
     overlays::Dialog,
     primitives::IconName,
@@ -12,7 +12,7 @@ use ely_gpui_component::{
     theme::{ActiveTheme, ControlSize, Mode, TextSize, Theme},
 };
 use gpui::{div, prelude::*, px, Context, Entity, IntoElement};
-use jsondiff::DiffMode;
+use jsondiff::{DiffMode, MAX_FILES, MIN_FILES};
 
 /// Renderiza el modal de Configuración de la aplicación usando Dialog y componentes de Ely.
 pub fn render_settings_dialog(
@@ -171,18 +171,134 @@ pub fn render_settings_dialog(
                                 ),
                         ),
                 )
-                .child(
-                    SettingsSection::new("Capacidad y Soporte")
-                        .description("Límites del motor y características admitidas.")
+                .child({
+                    let view_add = view.clone();
+                    let view_clear = view.clone();
+                    let can_add = state.paths.len() < MAX_FILES;
+                    let file_count = state.paths.len();
+
+                    let mut section = SettingsSection::new("Gestión de Archivos y Capacidad")
+                        .description("Controla los archivos JSON en la comparación matricial (admite de 2 a 10 archivos).")
                         .row(
-                            SettingsRow::new("Límite de archivos")
-                                .description("Comparación matricial de 2 a 10 archivos JSON simultáneos.")
+                            SettingsRow::new("Agregar archivos a la comparación")
+                                .description(if can_add {
+                                    format!("Incorpora archivos adicionales sin descartar los actuales ({file_count} de {MAX_FILES}).")
+                                } else {
+                                    format!("Se ha alcanzado la capacidad máxima de {MAX_FILES} archivos simultáneos.")
+                                })
                                 .control(
-                                    Badge::new("2 - 10 archivos")
-                                        .tone(Tone::Info),
+                                    Button::new(
+                                        "btn_add_files_settings",
+                                        if can_add { "Agregar archivos…" } else { "Límite alcanzado" },
+                                    )
+                                    .size(ControlSize::Sm)
+                                    .variant(if can_add { ButtonVariant::Primary } else { ButtonVariant::Outline })
+                                    .icon(IconName::FolderPlus)
+                                    .on_click(move |_, _, cx| {
+                                        if can_add {
+                                            view_add.update(cx, |this, cx| {
+                                                this.pick_more_files(cx);
+                                            });
+                                        }
+                                    }),
                                 ),
-                        ),
-                )
+                        )
+                        .row(
+                            SettingsRow::new("Archivos activos")
+                                .description("Estado actual de la sesión de comparación.")
+                                .control(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Badge::new(format!("{file_count} / {MAX_FILES}"))
+                                                .tone(if file_count >= MIN_FILES {
+                                                    Tone::Success
+                                                } else if file_count == 1 {
+                                                    Tone::Warning
+                                                } else {
+                                                    Tone::Neutral
+                                                }),
+                                        )
+                                        .when(file_count > 0, |parent| {
+                                            parent.child(
+                                                Button::new("btn_clear_settings", "Limpiar todo")
+                                                    .size(ControlSize::Sm)
+                                                    .variant(ButtonVariant::Ghost)
+                                                    .icon(IconName::Trash2)
+                                                    .on_click(move |_, _, cx| {
+                                                        view_clear.update(cx, |this, cx| {
+                                                            this.clear_files(cx);
+                                                        });
+                                                    }),
+                                            )
+                                        }),
+                                ),
+                        );
+
+                    if !state.paths.is_empty() {
+                        let files_box = div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .p_2()
+                            .rounded_md()
+                            .bg(colors.sunken)
+                            .border_1()
+                            .border_color(colors.border)
+                            .children(state.paths.iter().enumerate().map(|(idx, path)| {
+                                let filename = path
+                                    .file_name()
+                                    .map(|f| f.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| format!("Archivo {}", idx + 1));
+                                let view_rm = view.clone();
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_2()
+                                    .py_1()
+                                    .px_2()
+                                    .rounded_sm()
+                                    .hover(|s| s.bg(colors.hover))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                Badge::new(format!("#{}", idx + 1))
+                                                    .tone(if idx == 0 { Tone::Accent } else { Tone::Neutral }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(theme.text_size(TextSize::Sm))
+                                                    .text_color(colors.fg)
+                                                    .child(filename),
+                                            ),
+                                    )
+                                    .child(
+                                        IconButton::new(("btn_rm_file_settings", idx), IconName::X)
+                                            .size(ControlSize::Sm)
+                                            .tooltip("Quitar archivo")
+                                            .on_click(move |_, _, cx| {
+                                                view_rm.update(cx, |this, cx| {
+                                                    this.remove_file(idx, cx);
+                                                });
+                                            }),
+                                    )
+                            }));
+
+                        section = section.row(
+                            SettingsRow::new("Lista de archivos cargados")
+                                .description("Puedes descartar archivos individualmente.")
+                                .control(files_box),
+                        );
+                    }
+
+                    section
+                })
                 .into_any_element()
         }
         SettingsTab::Shortcuts => div()

@@ -15,7 +15,7 @@ use ely_gpui_component::{
     forms::{InputEvent, TextInput},
     git::DiffLayout,
     primitives::IconName,
-    theme::{ActiveTheme, ControlSize, Mode, Radius, Theme},
+    theme::{ActiveTheme, ControlSize, Mode, Radius, TextSize, Theme},
 };
 use gpui::{
     div, prelude::*, px, size, App, Bounds, Context, Entity, ExternalPaths, FocusHandle,
@@ -241,7 +241,40 @@ impl DiffView {
         cx.notify();
     }
 
-    /// Abre el diálogo nativo para seleccionar archivos JSON del sistema.
+    /// Agrega archivos adicionales a la lista existente sin duplicados y respetando el límite máximo.
+    pub(crate) fn add_paths(&mut self, new_paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let mut added = 0;
+        let prev_len = self.paths.len();
+        for p in new_paths {
+            if !self.paths.contains(&p) {
+                if self.paths.len() < MAX_FILES {
+                    self.paths.push(p);
+                    added += 1;
+                } else {
+                    self.show_toast(
+                        format!("Límite alcanzado: máximo {MAX_FILES} archivos."),
+                        cx,
+                    );
+                    break;
+                }
+            }
+        }
+        if added > 0 {
+            self.reload();
+            self.show_toast(
+                format!(
+                    "{added} archivo(s) agregado(s). Total: {} de {MAX_FILES}",
+                    self.paths.len()
+                ),
+                cx,
+            );
+            cx.notify();
+        } else if prev_len > 0 {
+            self.show_toast("Los archivos seleccionados ya estaban cargados", cx);
+        }
+    }
+
+    /// Abre el diálogo nativo para seleccionar y REEMPLAZAR los archivos cargados.
     pub(crate) fn pick_files(&mut self, cx: &mut Context<Self>) {
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -290,6 +323,66 @@ impl DiffView {
         .detach();
     }
 
+    /// Abre el diálogo nativo para seleccionar y AGREGAR archivos a la comparación actual.
+    pub(crate) fn pick_more_files(&mut self, cx: &mut Context<Self>) {
+        let available = MAX_FILES.saturating_sub(self.paths.len());
+        if available == 0 {
+            self.show_toast(
+                format!("Ya se alcanzó el límite máximo de {MAX_FILES} archivos"),
+                cx,
+            );
+            return;
+        }
+
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(
+                format!("Selecciona hasta {available} archivo(s) JSON para agregar").into(),
+            ),
+        });
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(paths))) = res {
+                if !paths.is_empty() {
+                    this.update(cx, |this, cx| this.add_paths(paths, cx)).ok();
+                    return;
+                }
+            }
+
+            // Fallback con zenity en Linux si xdg-desktop-portal no está disponible o falla
+            #[cfg(target_os = "linux")]
+            {
+                let output = std::process::Command::new("zenity")
+                    .arg("--file-selection")
+                    .arg("--multiple")
+                    .arg("--separator=|")
+                    .arg("--file-filter=Archivos JSON (*.json) | *.json")
+                    .arg(format!(
+                        "--title=Selecciona hasta {available} archivo(s) JSON para agregar"
+                    ))
+                    .output();
+
+                if let Ok(out) = output {
+                    if out.status.success() {
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        let paths: Vec<PathBuf> = stdout
+                            .trim()
+                            .split('|')
+                            .map(|s| PathBuf::from(s.trim()))
+                            .filter(|p| !p.as_os_str().is_empty())
+                            .collect();
+                        if !paths.is_empty() {
+                            this.update(cx, |this, cx| this.add_paths(paths, cx)).ok();
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
     /// Mueve un archivo de una columna a otra en la comparación interactiva.
     pub(crate) fn move_file(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
         if let Some(c) = &mut self.comparison {
@@ -322,7 +415,7 @@ impl DiffView {
 
     /// Quita un archivo específico de la lista de comparación.
     pub(crate) fn remove_file(&mut self, idx: usize, cx: &mut Context<Self>) {
-        if idx < self.paths.len() && self.paths.len() > MIN_FILES {
+        if idx < self.paths.len() {
             let removed = self.paths.remove(idx);
             let name = removed
                 .file_name()
@@ -552,6 +645,9 @@ impl gpui::Render for DiffView {
         let body: gpui::AnyElement = if let Some(err) = &self.error {
             let theme = cx.theme();
             let colors = &theme.colors;
+            let can_add_more = self.paths.len() < MAX_FILES;
+            let is_waiting_for_second = self.paths.len() == 1;
+
             div()
                 .flex()
                 .flex_col()
@@ -562,20 +658,57 @@ impl gpui::Render for DiffView {
                 .child(
                     div()
                         .p_4()
+                        .max_w(px(520.0))
                         .rounded(theme.radius(Radius::Md))
-                        .bg(colors.danger.opacity(0.12))
+                        .bg(if is_waiting_for_second {
+                            colors.warning.opacity(0.12)
+                        } else {
+                            colors.danger.opacity(0.12)
+                        })
                         .border_1()
-                        .border_color(colors.danger)
-                        .text_color(colors.danger)
+                        .border_color(if is_waiting_for_second {
+                            colors.warning
+                        } else {
+                            colors.danger
+                        })
+                        .text_color(if is_waiting_for_second {
+                            colors.warning
+                        } else {
+                            colors.danger
+                        })
                         .child(err.clone()),
                 )
                 .child(
-                    Button::new("btn_clear_error", "Limpiar y volver a empezar")
-                        .size(ControlSize::Sm)
-                        .variant(ButtonVariant::Outline)
-                        .icon(IconName::RotateCcw)
-                        .on_click(cx.listener(|this, _, _, cx| this.clear_files(cx))),
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .when(can_add_more, |el| {
+                            el.child(
+                                Button::new("btn_add_more_error", "Agregar otro archivo JSON…")
+                                    .primary()
+                                    .size(ControlSize::Sm)
+                                    .icon(IconName::FolderPlus)
+                                    .on_click(cx.listener(|this, _, _, cx| this.pick_more_files(cx))),
+                            )
+                        })
+                        .child(
+                            Button::new("btn_clear_error", "Limpiar")
+                                .size(ControlSize::Sm)
+                                .variant(ButtonVariant::Outline)
+                                .icon(IconName::RotateCcw)
+                                .on_click(cx.listener(|this, _, _, cx| this.clear_files(cx))),
+                        ),
                 )
+                .when(is_waiting_for_second, |el| {
+                    el.child(
+                        div()
+                            .text_size(theme.text_size(TextSize::Xs))
+                            .text_color(colors.fg_muted)
+                            .child("Pista: También puedes arrastrar el segundo archivo directamente a esta ventana."),
+                    )
+                })
                 .into_any_element()
         } else if self.comparison.is_some() {
             match self.view_mode {
@@ -637,7 +770,12 @@ impl gpui::Render for DiffView {
                 }
             }))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                this.set_paths(paths.paths().to_vec(), cx);
+                let dropped: Vec<PathBuf> = paths.paths().to_vec();
+                if this.paths.is_empty() {
+                    this.set_paths(dropped, cx);
+                } else {
+                    this.add_paths(dropped, cx);
+                }
             }))
             .child(toolbar)
             .child(body)

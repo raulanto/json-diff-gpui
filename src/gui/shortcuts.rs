@@ -24,8 +24,13 @@ pub fn shortcuts_list() -> Vec<Shortcut> {
         },
         Shortcut {
             group: "General & Navegación".into(),
-            name: "Abrir archivos JSON del disco".into(),
+            name: "Abrir y reemplazar archivos JSON".into(),
             keys: "secondary-o".into(),
+        },
+        Shortcut {
+            group: "General & Navegación".into(),
+            name: "Agregar archivos JSON a la comparación".into(),
+            keys: "secondary-shift-o".into(),
         },
         Shortcut {
             group: "General & Navegación".into(),
@@ -121,6 +126,9 @@ pub fn run_command_action(
         }
         "open_files" => {
             state.pick_files(cx);
+        }
+        "add_more_files" => {
+            state.pick_more_files(cx);
         }
         "clear_files" => {
             state.clear_files(cx);
@@ -252,7 +260,12 @@ pub fn handle_global_key(
         return true;
     }
 
-    if ctrl_or_cmd && key.eq_ignore_ascii_case("o") {
+    if ctrl_or_cmd && shift && key.eq_ignore_ascii_case("o") {
+        state.pick_more_files(cx);
+        return true;
+    }
+
+    if ctrl_or_cmd && !shift && key.eq_ignore_ascii_case("o") {
         state.pick_files(cx);
         return true;
     }

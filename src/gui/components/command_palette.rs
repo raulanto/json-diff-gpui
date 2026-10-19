@@ -35,9 +35,12 @@ pub fn render_command_palette(view: Entity<DiffView>) -> impl IntoElement {
     .group(
         "Archivos",
         vec![
-            Command::new("open_files", "Abrir archivos JSON…")
+            Command::new("open_files", "Abrir y reemplazar archivos JSON…")
                 .icon(IconName::FolderOpen)
                 .keys("secondary-o"),
+            Command::new("add_more_files", "Agregar archivos JSON a la comparación…")
+                .icon(IconName::FolderPlus)
+                .keys("secondary-shift-o"),
             Command::new("clear_files", "Limpiar archivos cargados")
                 .icon(IconName::Trash2)
                 .keys("secondary-shift-l"),
