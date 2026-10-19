@@ -106,8 +106,10 @@ impl gpui::Render for DiffView {
                 }
             }
         } else {
-            components::empty_view::render_empty_view(cx).into_any_element()
+            components::empty_view::render_empty_view(self, view.clone(), cx).into_any_element()
         };
+
+        let status_bar = components::status_bar::render_status_bar(self, view.clone(), cx);
 
         let cmd_palette = if self.show_command_palette {
             Some(
@@ -180,6 +182,7 @@ impl gpui::Render for DiffView {
             .child(project_bar)
             .child(toolbar)
             .child(body)
+            .child(status_bar)
             .children(cmd_palette)
             .children(settings_modal)
             .children(rename_modal)

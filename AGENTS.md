@@ -33,7 +33,8 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `src/gui/components/table_view.rs`: vista Tabla matricial virtualizada con `uniform_list`, reordenamiento interactivo, base dinámica y estados vacíos reactivos.
   - `src/gui/components/git_view.rs`: vista Diff Git (`DiffViewer` en modo Unified y Split con selector dinámico de destino y estadísticas).
   - `src/gui/components/editor_view.rs`: vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
-  - `src/gui/components/empty_view.rs`: pantalla de bienvenida / DropZone con atajos rápidos.
+  - `src/gui/components/empty_view.rs`: pantalla de bienvenida construida con `WelcomePage` y `RecentProjects` de Ely Components (acciones directas, historial de proyectos y zona DropZone interactiva).
+  - `src/gui/components/status_bar.rs`: barra de estado en el pie de la aplicación (`StatusBar`, `StatusBarItem`, `LanguageMode`, `IndentSettings`, `Encoding` y widget interactivo `CursorPosition` con posición reactiva Ln/Col).
   - `src/gui/components/command_palette.rs`: paleta de comandos interactiva (`CommandPalette` de Ely con búsqueda difusa y grupos categorizados).
   - `src/gui/components/settings_dialog.rs`: modal de Configuración (`Dialog`, `SettingsSection`, `SettingsRow` y `KeyboardShortcutsList` con catálogo reactivo de atajos).
 - `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI (soporta `-s|--selector <QUERY>`).

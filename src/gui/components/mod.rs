@@ -8,5 +8,6 @@ pub mod git_view;
 pub mod project_bar;
 pub mod schema_dialog;
 pub mod settings_dialog;
+pub mod status_bar;
 pub mod table_view;
 pub mod toolbar;

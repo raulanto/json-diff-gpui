@@ -99,6 +99,11 @@ impl DiffView {
             ed
         });
 
+        cx.observe(&editor, |_this, _ed, cx| {
+            cx.notify();
+        })
+        .detach();
+
         self.editor = Some(editor);
         self.update_schema_editor(window, cx);
     }

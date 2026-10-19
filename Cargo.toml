@@ -23,7 +23,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components", optional = true }
 gpui = { package = "gpui-pre", version = "=0.3.8", optional = true }
+[target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "wayland", "x11"], optional = true }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", optional = true }
 
 [profile.release]
 lto = "thin"
