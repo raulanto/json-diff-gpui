@@ -3,9 +3,12 @@
 use crate::gui::components::editor_view::compute_git_marks;
 use crate::gui::types::Density;
 use crate::gui::DiffView;
-use ely_gpui_component::editor::{CodeEditor, LineNumbers};
-use gpui::{prelude::*, Context, SharedString, Window};
-use jsondiff::{compare_with_base, format_json, load_file_from_str, validate_json};
+use ely_gpui_component::editor::{find_all, CodeEditor, LineNumbers};
+use ely_gpui_component::theme::ActiveTheme;
+use gpui::{prelude::*, Context, Focusable, SharedString, Window};
+use jsondiff::{
+    compare_with_base, format_json, generate_schema_from_str, load_file_from_str, validate_json,
+};
 use std::time::Duration;
 
 impl DiffView {
@@ -86,7 +89,9 @@ impl DiffView {
             let mut ed = CodeEditor::new(content.clone(), window, cx)
                 .language("json")
                 .line_numbers(LineNumbers::Absolute)
-                .rainbow_brackets();
+                .rainbow_brackets()
+                .minimap()
+                .sticky_scroll();
             if is_not_base && !base_content.is_empty() {
                 let marks = compute_git_marks(&base_content, &content);
                 ed.set_git_marks(marks, cx);
@@ -209,6 +214,258 @@ impl DiffView {
             cx,
         );
         cx.notify();
+    }
+
+    /// Alterna la visibilidad del widget de búsqueda en el editor.
+    pub(crate) fn toggle_find_widget(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_find_widget = !self.show_find_widget;
+        if self.show_find_widget {
+            let handle = self.find_input.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+            self.update_find_matches(cx);
+        } else {
+            self.close_find_widget(cx);
+        }
+        cx.notify();
+    }
+
+    /// Actualiza y resalta las coincidencias de búsqueda en el editor activo.
+    pub(crate) fn update_find_matches(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = &self.editor else { return };
+        let text = editor.read(cx).text().to_string();
+        let query = self.find_input.read(cx).text().to_string();
+
+        if query.is_empty() {
+            self.find_matches.clear();
+            self.find_current_index = None;
+            editor.update(cx, |ed, cx| ed.set_backgrounds(Vec::new(), cx));
+            cx.notify();
+            return;
+        }
+
+        match find_all(&text, &query, self.find_options) {
+            Ok(matches) => {
+                let total = matches.len();
+                self.find_matches = matches;
+                if total > 0 {
+                    if self.find_current_index.is_none()
+                        || self.find_current_index.unwrap() >= total
+                    {
+                        self.find_current_index = Some(0);
+                    }
+                } else {
+                    self.find_current_index = None;
+                }
+
+                let accent = cx.theme().colors.accent;
+                let backgrounds: Vec<(std::ops::Range<usize>, gpui::Hsla)> = self
+                    .find_matches
+                    .iter()
+                    .enumerate()
+                    .map(|(i, range)| {
+                        let is_current = self.find_current_index == Some(i);
+                        let color = if is_current {
+                            accent.opacity(0.65)
+                        } else {
+                            accent.opacity(0.25)
+                        };
+                        (range.clone(), color)
+                    })
+                    .collect();
+
+                editor.update(cx, |ed, cx| ed.set_backgrounds(backgrounds, cx));
+            }
+            Err(_) => {
+                self.find_matches.clear();
+                self.find_current_index = None;
+                editor.update(cx, |ed, cx| ed.set_backgrounds(Vec::new(), cx));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Avanza o retrocede entre las coincidencias de búsqueda.
+    pub(crate) fn step_find_match(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let total = self.find_matches.len();
+        if total == 0 {
+            return;
+        }
+
+        let curr = self.find_current_index.unwrap_or(0);
+        let next_idx = if forward {
+            (curr + 1) % total
+        } else {
+            (curr + total - 1) % total
+        };
+        self.find_current_index = Some(next_idx);
+
+        let Some(editor) = &self.editor else { return };
+        let accent = cx.theme().colors.accent;
+        let backgrounds: Vec<(std::ops::Range<usize>, gpui::Hsla)> = self
+            .find_matches
+            .iter()
+            .enumerate()
+            .map(|(i, range)| {
+                let is_current = self.find_current_index == Some(i);
+                let color = if is_current {
+                    accent.opacity(0.65)
+                } else {
+                    accent.opacity(0.25)
+                };
+                (range.clone(), color)
+            })
+            .collect();
+
+        editor.update(cx, |ed, cx| ed.set_backgrounds(backgrounds, cx));
+        cx.notify();
+    }
+
+    /// Reemplaza la coincidencia actual o todas las coincidencias.
+    pub(crate) fn replace_find_match(&mut self, all: bool, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.clone() else {
+            return;
+        };
+        let text = editor.read(cx).text().to_string();
+        let query = self.find_input.read(cx).text().to_string();
+        let replacement = self.replace_input.read(cx).text().to_string();
+
+        if query.is_empty() || self.find_matches.is_empty() {
+            return;
+        }
+
+        if all {
+            let count = self.find_matches.len();
+            let mut new_text = text;
+            let mut rev_matches = self.find_matches.clone();
+            rev_matches.sort_by(|a, b| b.start.cmp(&a.start));
+            for range in rev_matches {
+                if range.end <= new_text.len()
+                    && new_text.is_char_boundary(range.start)
+                    && new_text.is_char_boundary(range.end)
+                {
+                    new_text.replace_range(range, &replacement);
+                }
+            }
+            editor.update(cx, |ed, cx| ed.set_text(new_text, cx));
+            self.update_find_matches(cx);
+            self.show_toast(format!("Reemplazadas {count} ocurrencias"), cx);
+        } else if let Some(curr_idx) = self.find_current_index {
+            if curr_idx < self.find_matches.len() {
+                let range = self.find_matches[curr_idx].clone();
+                let mut new_text = text;
+                if range.end <= new_text.len()
+                    && new_text.is_char_boundary(range.start)
+                    && new_text.is_char_boundary(range.end)
+                {
+                    new_text.replace_range(range, &replacement);
+                    editor.update(cx, |ed, cx| ed.set_text(new_text, cx));
+                    self.update_find_matches(cx);
+                    self.show_toast("Ocurrencia reemplazada", cx);
+                }
+            }
+        }
+    }
+
+    /// Cierra el widget de búsqueda y limpia los resaltados en el editor.
+    pub(crate) fn close_find_widget(&mut self, cx: &mut Context<Self>) {
+        self.show_find_widget = false;
+        self.find_matches.clear();
+        self.find_current_index = None;
+        if let Some(editor) = &self.editor {
+            editor.update(cx, |ed, cx| ed.set_backgrounds(Vec::new(), cx));
+        }
+        cx.notify();
+    }
+
+    /// Abre el diálogo de previsualización de JSON Schema generado para el archivo activo.
+    pub(crate) fn open_schema_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = if let Some(editor) = &self.editor {
+            editor.read(cx).text().to_string()
+        } else if let Some(c) = &self.comparison {
+            if self.editor_file_idx < c.files.len() {
+                c.files[self.editor_file_idx].content.clone()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        if text.trim().is_empty() {
+            self.show_toast("No hay contenido JSON para generar el schema", cx);
+            return;
+        }
+
+        let title = self
+            .comparison
+            .as_ref()
+            .and_then(|c| c.files.get(self.editor_file_idx))
+            .map(|f| f.name.as_str())
+            .unwrap_or("DocumentSchema");
+
+        match generate_schema_from_str(&text, Some(title)) {
+            Ok(schema_str) => {
+                let ed_text = schema_str.clone();
+                let schema_editor = cx.new(|cx| {
+                    CodeEditor::new(ed_text, window, cx)
+                        .language("json")
+                        .line_numbers(LineNumbers::Absolute)
+                        .read_only()
+                        .rainbow_brackets()
+                });
+                self.schema_editor = Some(schema_editor);
+                self.generated_schema_text = schema_str;
+                self.show_schema_dialog = true;
+                cx.notify();
+            }
+            Err(e) => {
+                self.show_toast(format!("Error al generar schema: {e}"), cx);
+            }
+        }
+    }
+
+    /// Copia el JSON Schema generado al portapapeles.
+    pub(crate) fn copy_schema_to_clipboard(&mut self, cx: &mut Context<Self>) {
+        if !self.generated_schema_text.is_empty() {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                self.generated_schema_text.clone(),
+            ));
+            self.show_toast("JSON Schema copiado al portapapeles ✓", cx);
+        }
+    }
+
+    /// Exporta el JSON Schema generado a un archivo en disco.
+    pub(crate) fn export_schema_to_disk(&mut self, cx: &mut Context<Self>) {
+        if self.generated_schema_text.is_empty() {
+            return;
+        }
+        let file_name = self
+            .comparison
+            .as_ref()
+            .and_then(|c| c.files.get(self.editor_file_idx))
+            .map(|f| format!("{}.schema.json", f.name))
+            .unwrap_or_else(|| "schema.json".to_string());
+
+        let default_path = std::path::PathBuf::from(file_name);
+        let schema_content = self.generated_schema_text.clone();
+        let rx = cx.prompt_for_new_path(&default_path, None);
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(path))) = res {
+                if let Err(e) = std::fs::write(&path, &schema_content) {
+                    this.update(cx, |this, cx| {
+                        this.show_toast(format!("Error al guardar schema: {e}"), cx);
+                    })
+                    .ok();
+                } else {
+                    this.update(cx, |this, cx| {
+                        this.show_toast(format!("Schema guardado en: {}", path.display()), cx);
+                    })
+                    .ok();
+                }
+            }
+        })
+        .detach();
     }
 }
 

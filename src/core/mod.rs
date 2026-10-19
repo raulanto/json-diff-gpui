@@ -9,6 +9,7 @@ pub mod flatten;
 pub mod loader;
 pub mod project;
 pub mod report;
+pub mod schema;
 pub mod selector;
 pub mod types;
 
@@ -20,5 +21,6 @@ pub use flatten::*;
 pub use loader::*;
 pub use project::*;
 pub use report::*;
+pub use schema::*;
 pub use selector::*;
 pub use types::*;

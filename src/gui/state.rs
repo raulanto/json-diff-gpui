@@ -2,7 +2,7 @@
 
 use crate::gui::types::{Density, SettingsTab, ViewMode};
 use ely_gpui_component::{
-    editor::CodeEditor,
+    editor::{CodeEditor, FindOptions},
     forms::{InputEvent, TextInput},
     git::DiffLayout,
 };
@@ -39,6 +39,22 @@ pub struct DiffView {
     // Estado para vista Editor
     pub(crate) editor_file_idx: usize,
     pub(crate) editor: Option<Entity<CodeEditor>>,
+
+    // Búsqueda y reemplazo en el Editor (FindWidget)
+    pub(crate) show_find_widget: bool,
+    pub(crate) find_input: Entity<TextInput>,
+    pub(crate) _find_sub: Subscription,
+    pub(crate) replace_input: Entity<TextInput>,
+    pub(crate) _replace_sub: Subscription,
+    pub(crate) find_options: FindOptions,
+    pub(crate) find_matches: Vec<std::ops::Range<usize>>,
+    pub(crate) find_current_index: Option<usize>,
+    pub(crate) show_replace: bool,
+
+    // Previsualización de JSON Schema
+    pub(crate) show_schema_dialog: bool,
+    pub(crate) schema_editor: Option<Entity<CodeEditor>>,
+    pub(crate) generated_schema_text: String,
 
     // Paleta de comandos (Command Palette)
     pub(crate) show_command_palette: bool,
@@ -137,6 +153,21 @@ impl DiffView {
                 },
             );
 
+        let find_input =
+            cx.new(|cx| TextInput::new(window, cx).placeholder("Buscar en el editor…"));
+        let find_sub = cx.subscribe(&find_input, |this, _, event: &InputEvent, cx| {
+            if let InputEvent::Changed = event {
+                this.update_find_matches(cx);
+            }
+        });
+
+        let replace_input = cx.new(|cx| TextInput::new(window, cx).placeholder("Reemplazar por…"));
+        let replace_sub = cx.subscribe(&replace_input, |_, _, event: &InputEvent, cx| {
+            if let InputEvent::Changed = event {
+                cx.notify();
+            }
+        });
+
         let settings_shortcuts_search =
             cx.new(|cx| TextInput::new(window, cx).placeholder("Buscar atajos de teclado…"));
 
@@ -228,6 +259,18 @@ impl DiffView {
             git_open_stretches: Vec::new(),
             editor_file_idx: 0,
             editor: None,
+            show_find_widget: false,
+            find_input,
+            _find_sub: find_sub,
+            replace_input,
+            _replace_sub: replace_sub,
+            find_options: FindOptions::default(),
+            find_matches: Vec::new(),
+            find_current_index: None,
+            show_replace: false,
+            show_schema_dialog: false,
+            schema_editor: None,
+            generated_schema_text: String::new(),
             show_command_palette: false,
             show_settings: false,
             settings_tab: SettingsTab::General,

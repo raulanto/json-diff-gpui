@@ -137,6 +137,15 @@ impl gpui::Render for DiffView {
             None
         };
 
+        let schema_modal = if self.show_schema_dialog {
+            Some(
+                components::schema_dialog::render_schema_dialog(self, view.clone(), cx)
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+
         let theme = cx.theme();
         let colors = &theme.colors;
 
@@ -174,5 +183,6 @@ impl gpui::Render for DiffView {
             .children(cmd_palette)
             .children(settings_modal)
             .children(rename_modal)
+            .children(schema_modal)
     }
 }

@@ -400,3 +400,44 @@ fn test_workspace_tabs_and_navigation() {
     assert_eq!(ws.projects[0].id, id2);
     assert_eq!(ws.projects[1].id, id1);
 }
+
+#[test]
+fn test_json_schema_generation() {
+    let json_text = r#"{
+        "id": 101,
+        "name": "Antigravity",
+        "active": true,
+        "ratio": 3.14,
+        "tags": ["code", "rust"],
+        "metadata": {
+            "version": 2
+        }
+    }"#;
+
+    let schema_str = generate_schema_from_str(json_text, Some("TestEntity")).unwrap();
+    let schema: serde_json::Value = serde_json::from_str(&schema_str).unwrap();
+
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+    assert_eq!(schema["title"], "TestEntity");
+    assert_eq!(schema["type"], "object");
+
+    let props = &schema["properties"];
+    assert_eq!(props["id"]["type"], "integer");
+    assert_eq!(props["name"]["type"], "string");
+    assert_eq!(props["active"]["type"], "boolean");
+    assert_eq!(props["ratio"]["type"], "number");
+    assert_eq!(props["tags"]["type"], "array");
+    assert_eq!(props["tags"]["items"]["type"], "string");
+    assert_eq!(props["metadata"]["type"], "object");
+    assert_eq!(
+        props["metadata"]["properties"]["version"]["type"],
+        "integer"
+    );
+
+    let req = schema["required"].as_array().unwrap();
+    assert!(req.contains(&serde_json::Value::String("id".to_string())));
+    assert!(req.contains(&serde_json::Value::String("name".to_string())));
+}

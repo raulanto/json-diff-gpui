@@ -4,7 +4,7 @@ use crate::gui::DiffView;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant},
     data_display::{Badge, Tone},
-    editor::GitMark,
+    editor::{FindWidget, GitMark},
     git::{diff, LineKind, Stretch},
     primitives::IconName,
     theme::{ActiveTheme, ControlSize},
@@ -31,7 +31,7 @@ pub fn compute_git_marks(base: &str, current: &str) -> Vec<(usize, GitMark)> {
     marks
 }
 
-/// Renderiza la vista del editor de código con pestañas de archivos y barra de herramientas.
+/// Renderiza la vista del editor de código con pestañas de archivos, FindWidget y barra de herramientas.
 pub fn render_editor_view(
     state: &DiffView,
     view: Entity<DiffView>,
@@ -115,6 +115,38 @@ pub fn render_editor_view(
                 .items_center()
                 .gap_2()
                 .child(
+                    Button::new("btn_find_editor", "Buscar")
+                        .size(ControlSize::Sm)
+                        .variant(if state.show_find_widget {
+                            ButtonVariant::Primary
+                        } else {
+                            ButtonVariant::Ghost
+                        })
+                        .icon(IconName::Search)
+                        .on_click({
+                            let view = view.clone();
+                            move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_find_widget(window, cx);
+                                });
+                            }
+                        }),
+                )
+                .child(
+                    Button::new("btn_schema_editor", "JSON Schema")
+                        .size(ControlSize::Sm)
+                        .variant(ButtonVariant::Ghost)
+                        .icon(IconName::FileJson)
+                        .on_click({
+                            let view = view.clone();
+                            move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.open_schema_dialog(window, cx);
+                                });
+                            }
+                        }),
+                )
+                .child(
                     Button::new("fmt_json", "Formatear")
                         .size(ControlSize::Sm)
                         .variant(ButtonVariant::Ghost)
@@ -172,11 +204,69 @@ pub fn render_editor_view(
                 ),
         );
 
-    let editor_element = if let Some(editor) = &state.editor {
-        div().flex_1().min_h_0().size_full().child(editor.clone())
+    // Widget flotante de búsqueda integrado con Ely
+    let find_widget_element = if state.show_find_widget {
+        let mut fw = FindWidget::new(
+            "editor_find_widget",
+            &state.find_input,
+            state.find_current_index,
+            state.find_matches.len(),
+        )
+        .options(state.find_options);
+
+        if state.show_replace {
+            fw = fw.replace(&state.replace_input);
+        }
+
+        let view_opt = view.clone();
+        fw = fw.on_options(move |opts, _, cx| {
+            view_opt.update(cx, |this, cx| {
+                this.find_options = opts;
+                this.update_find_matches(cx);
+            });
+        });
+
+        let view_step = view.clone();
+        fw = fw.on_step(move |forward, _, cx| {
+            view_step.update(cx, |this, cx| {
+                this.step_find_match(forward, cx);
+            });
+        });
+
+        let view_repl = view.clone();
+        fw = fw.on_replace(move |all, _, cx| {
+            view_repl.update(cx, |this, cx| {
+                this.replace_find_match(all, cx);
+            });
+        });
+
+        let view_toggle = view.clone();
+        fw = fw.on_toggle_replace(move |show, _, cx| {
+            view_toggle.update(cx, |this, cx| {
+                this.show_replace = show;
+                cx.notify();
+            });
+        });
+
+        let view_close = view.clone();
+        fw = fw.on_close(move |_, cx| {
+            view_close.update(cx, |this, cx| {
+                this.close_find_widget(cx);
+            });
+        });
+
+        Some(div().absolute().top_3().right_6().shadow_lg().child(fw))
     } else {
-        div().flex_1().min_h_0().size_full()
+        None
     };
+
+    let editor_element = div()
+        .relative()
+        .flex_1()
+        .min_h_0()
+        .size_full()
+        .when_some(state.editor.clone(), |el, ed| el.child(ed))
+        .children(find_widget_element);
 
     div()
         .flex_1()

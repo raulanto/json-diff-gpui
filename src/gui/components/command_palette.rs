@@ -83,6 +83,15 @@ pub fn render_command_palette(view: Entity<DiffView>) -> impl IntoElement {
     .group(
         "Editor de Código",
         vec![
+            Command::new(
+                "find_in_editor",
+                "Buscar y reemplazar en editor (FindWidget)",
+            )
+            .icon(IconName::Search)
+            .keys("secondary-f"),
+            Command::new("preview_schema", "Previsualizar JSON Schema estructural")
+                .icon(IconName::FileJson)
+                .keys("secondary-j"),
             Command::new("format_json", "Formatear JSON (2 espacios)")
                 .icon(IconName::Sparkles)
                 .keys("secondary-shift-i"),

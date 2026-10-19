@@ -79,6 +79,16 @@ pub fn shortcuts_list() -> Vec<Shortcut> {
         },
         Shortcut {
             group: "Editor".into(),
+            name: "Buscar y reemplazar en editor (FindWidget)".into(),
+            keys: "secondary-f".into(),
+        },
+        Shortcut {
+            group: "Editor".into(),
+            name: "Previsualizar JSON Schema".into(),
+            keys: "secondary-j".into(),
+        },
+        Shortcut {
+            group: "Editor".into(),
             name: "Formatear JSON (2 espacios)".into(),
             keys: "secondary-shift-i".into(),
         },
@@ -213,6 +223,14 @@ pub fn run_command_action(
         "reset_selector" => {
             state.reset_selector(cx);
         }
+        "find_in_editor" => {
+            if state.view_mode == ViewMode::Editor {
+                state.toggle_find_widget(window, cx);
+            }
+        }
+        "preview_schema" => {
+            state.open_schema_dialog(window, cx);
+        }
         "format_json" => {
             if state.view_mode == ViewMode::Editor {
                 state.format_editor_json(cx);
@@ -296,6 +314,15 @@ pub fn handle_global_key(
     let shift = event.keystroke.modifiers.shift;
 
     if key.eq_ignore_ascii_case("escape") {
+        if state.show_find_widget {
+            state.close_find_widget(cx);
+            return true;
+        }
+        if state.show_schema_dialog {
+            state.show_schema_dialog = false;
+            cx.notify();
+            return true;
+        }
         if state.show_command_palette || state.show_settings {
             state.show_command_palette = false;
             state.show_settings = false;
@@ -458,6 +485,16 @@ pub fn handle_global_key(
     }
 
     if state.view_mode == ViewMode::Editor {
+        if ctrl_or_cmd && key.eq_ignore_ascii_case("f") && !shift {
+            state.toggle_find_widget(window, cx);
+            return true;
+        }
+
+        if ctrl_or_cmd && key.eq_ignore_ascii_case("j") && !shift {
+            state.open_schema_dialog(window, cx);
+            return true;
+        }
+
         if ctrl_or_cmd && shift && key.eq_ignore_ascii_case("i") {
             state.format_editor_json(cx);
             return true;
