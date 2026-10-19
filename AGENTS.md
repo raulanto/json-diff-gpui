@@ -19,10 +19,15 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `src/core/tests.rs`: suite completa de pruebas unitarias agnósticas de GUI.
   - `src/lib.rs`: orquestador raíz que re-exporta toda la API pública de `core` manteniendo 100% de compatibilidad hacia atrás.
 - `src/gui.rs` y `src/gui/`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Arquitectura modular desacoplada:
-  - `src/gui.rs`: orquestador de ciclo de vida, estado (`DiffView`), carga de archivos y dispatch principal de render.
+  - `src/gui.rs`: punto de entrada público (`run`) y re-exportador de la API gráfica.
+  - `src/gui/state.rs`: modelo de estado principal `DiffView` y constructor `new`.
+  - `src/gui/file_ops.rs`: gestión de archivos en disco y memoria (`reload`, `refilter`, `add_paths`, `pick_files`, `pick_more_files`, `move_file`, fallback zenity).
+  - `src/gui/project_ops.rs`: ciclo de vida de proyectos y pestañas (`Workspace`, creación, duplicación, renombrado, importación y exportación de archivos JSON).
+  - `src/gui/editor_ops.rs`: operaciones del editor en vivo (`CodeEditor`), git marks contra base, formateo a 2 espacios, validación sintáctica, selector JSONPath, densidad y toasts.
+  - `src/gui/render.rs`: orquestación de renderizado GPUI (`impl Render for DiffView`), modales reactivos, listeners de teclado y drop de archivos.
   - `src/gui/types.rs`: enums y structs de presentación (`Density`, `ViewMode`, `SettingsTab`).
   - `src/gui/shortcuts.rs`: catálogo de atajos (`Shortcut`), listeners globales de teclado y dispatch de comandos.
-  - `src/gui/components/project_bar.rs`: barra horizontal de pestañas (Tabs) de proyectos, creación rápida con `+`, renombrado reactivo, duplicación, guardado y cierre de pestañas.
+  - `src/gui/components/project_bar.rs`: barra horizontal de pestañas de proyectos construida con `EditorTabs` y `EditorTab` de Ely Components (cierre nativo, reordenamiento por arrastre, menú de desbordamiento, creación rápida con `+`, renombrado, duplicación y persistencia).
   - `src/gui/components/cell.rs`: funciones reutilizables de renderizado de celdas (micro-badges `+ Nuevo`, `≠ Tipo`, `Ausente`, chips de tipo, gutters numéricos de 32px y tooltips).
   - `src/gui/components/toolbar.rs`: barra superior de herramientas con selectores segmentados, inputs de búsqueda y selector JSONPath, badges y botones de acción.
   - `src/gui/components/table_view.rs`: vista Tabla matricial virtualizada con `uniform_list`, reordenamiento interactivo, base dinámica y estados vacíos reactivos.

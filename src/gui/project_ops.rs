@@ -100,6 +100,14 @@ impl DiffView {
         }
     }
 
+    /// Reordena una pestaña de proyecto arrastrada.
+    pub(crate) fn reorder_project_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if self.workspace.reorder_tabs(from, to) {
+            let _ = self.workspace.save_to_disk();
+            cx.notify();
+        }
+    }
+
     /// Duplica el proyecto activo actual creando una copia en nueva pestaña.
     pub(crate) fn duplicate_current_project(
         &mut self,

@@ -273,11 +273,11 @@ pub fn render_table_view(
         header = header.child(col_header);
     }
 
-    // ------------------------------------------------ Filas virtualizadas mediante uniform_list
-    let visible_indices = state.visible.clone();
-    let list_indices = visible_indices.clone();
-    let rows_data = c.rows.clone();
+    // ------------------------------------------------ Filas virtualizadas mediante uniform_list (Zero-Copy Arc)
+    let list_indices = std::sync::Arc::clone(&state.cached_visible);
+    let rows_data = std::sync::Arc::clone(&state.cached_rows);
     let list_view = view.clone();
+    let is_empty = list_indices.is_empty();
 
     let list = uniform_list(
         "diff_rows",
@@ -309,9 +309,7 @@ pub fn render_table_view(
                         .hover(|s| s.bg(colors.hover.opacity(0.45)));
 
                     // Columna de ruta
-                    let path_str = row.path.clone();
-                    let copy_path = path_str.clone();
-                    let (parent_path, leaf_name) = split_path(&path_str);
+                    let (parent_path, leaf_name) = split_path(&row.path);
 
                     let path_cell = div()
                         .id(("path_cell", row_idx))
@@ -325,14 +323,17 @@ pub fn render_table_view(
                         .cursor_pointer()
                         .tooltip(Tooltip::text(format!(
                             "Ruta: {}\nClic para copiar",
-                            copy_path
+                            row.path
                         )))
                         .on_click({
                             let view = list_view.clone();
                             move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copy_path.clone()));
                                 view.update(cx, |this, cx| {
-                                    this.show_toast(format!("Ruta copiada: {}", copy_path), cx);
+                                    if let Some(r) = this.cached_rows.get(row_idx) {
+                                        let p = r.path.clone();
+                                        cx.write_to_clipboard(ClipboardItem::new_string(p.clone()));
+                                        this.show_toast(format!("Ruta copiada: {}", p), cx);
+                                    }
                                 });
                             }
                         })
@@ -402,18 +403,17 @@ pub fn render_table_view(
                         let cell = row.cells.get(file_col).and_then(|c| c.as_ref());
 
                         let cell_el = if let Some(c) = cell {
-                            let val_str = c.value.clone();
-                            let copy_val = val_str.clone();
-                            let line_info = format!("L{}", c.line);
+                            let val_str = &c.value;
+                            let line_num = c.line;
 
-                            let jtype = detect_json_type(&val_str);
+                            let jtype = detect_json_type(val_str);
                             let (differs_from_ref, type_changed, is_new_field) = if is_base {
                                 (false, false, false)
                             } else {
                                 match ref_cell {
                                     Some(b) => (
-                                        b.value != c.value,
-                                        is_type_change(&b.value, &c.value),
+                                        b.value != *val_str,
+                                        is_type_change(&b.value, val_str),
                                         false,
                                     ),
                                     None => (true, false, true),
@@ -424,13 +424,13 @@ pub fn render_table_view(
                                 is_base,
                                 diff_mode,
                                 base_ix,
-                                c.line,
+                                line_num,
                                 is_new_field,
                                 type_changed,
                                 differs_from_ref,
                                 &ref_label,
                                 ref_cell.map(|b| b.value.as_str()),
-                                &val_str,
+                                val_str,
                             );
 
                             let mut val_content = div()
@@ -451,7 +451,7 @@ pub fn render_table_view(
 
                             val_content = val_content.child(render_type_content(
                                 jtype,
-                                &val_str,
+                                val_str,
                                 differs_from_ref,
                                 is_base,
                                 &theme,
@@ -474,14 +474,19 @@ pub fn render_table_view(
                                 .on_click({
                                     let view = list_view.clone();
                                     move |_, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            copy_val.clone(),
-                                        ));
                                         view.update(cx, |this, cx| {
-                                            this.show_toast(
-                                                format!("Valor copiado: {}", copy_val),
-                                                cx,
-                                            );
+                                            if let Some(r) = this.cached_rows.get(row_idx) {
+                                                if let Some(Some(c)) = r.cells.get(file_col) {
+                                                    let val = c.value.clone();
+                                                    cx.write_to_clipboard(
+                                                        ClipboardItem::new_string(val.clone()),
+                                                    );
+                                                    this.show_toast(
+                                                        format!("Valor copiado: {}", val),
+                                                        cx,
+                                                    );
+                                                }
+                                            }
                                         });
                                     }
                                 });
@@ -495,6 +500,7 @@ pub fn render_table_view(
                                 cell_box = cell_box.bg(colors.sunken.opacity(0.30));
                             }
 
+                            let line_info = format!("L{}", line_num);
                             cell_box
                                 .child(render_line_gutter(&line_info, &theme))
                                 .child(val_content)
@@ -550,7 +556,7 @@ pub fn render_table_view(
     .size_full();
 
     // ------------------------------------------------ Estado vacío de resultados
-    let body_content = if visible_indices.is_empty() {
+    let body_content = if is_empty {
         div()
             .flex()
             .flex_col()

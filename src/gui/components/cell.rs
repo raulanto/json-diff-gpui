@@ -213,6 +213,16 @@ pub fn render_type_content(
     }
 }
 
+#[inline]
+fn truncate_preview(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{truncated}…")
+    }
+}
+
 /// Construye el mensaje completo para el tooltip descriptivo de una celda con valor.
 #[allow(clippy::too_many_arguments)]
 pub fn build_cell_tooltip(
@@ -246,18 +256,18 @@ pub fn build_cell_tooltip(
             ref_label, line
         )
     } else if type_changed {
+        let prev = truncate_preview(ref_val.unwrap_or(""), 120);
+        let curr = truncate_preview(val_str, 120);
         format!(
-            "Cambio de tipo vs {}\nAnterior: {}\nActual: {}\nClic para copiar",
-            ref_label,
-            ref_val.unwrap_or(""),
-            val_str
+            "Cambio de tipo vs {}\nAnterior: {prev}\nActual: {curr}\nClic para copiar",
+            ref_label
         )
     } else if differs_from_ref {
+        let prev = truncate_preview(ref_val.unwrap_or(""), 120);
+        let curr = truncate_preview(val_str, 120);
         format!(
-            "Difiere de {}\nAnterior: {}\nActual: {}\nClic para copiar",
-            ref_label,
-            ref_val.unwrap_or(""),
-            val_str
+            "Difiere de {}\nAnterior: {prev}\nActual: {curr}\nClic para copiar",
+            ref_label
         )
     } else {
         format!("Idéntico a {} | L{}\nClic para copiar", ref_label, line)

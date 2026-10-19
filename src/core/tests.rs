@@ -149,11 +149,19 @@ fn test_matches_filter() {
     let age_row = comp.rows.iter().find(|r| r.path == "user.age").unwrap();
 
     assert!(matches_filter(name_row, "name"));
+    assert!(matches_filter(name_row, "NAME"));
     assert!(matches_filter(name_row, "alice"));
+    assert!(matches_filter(name_row, "ALICE"));
     assert!(matches_filter(name_row, "bob"));
+    assert!(matches_filter(name_row, "BoB"));
     assert!(!matches_filter(name_row, "age"));
 
+    assert!(matches_filter_normalized(name_row, "alice"));
+    assert!(matches_filter_normalized(name_row, "bob"));
+    assert!(!matches_filter_normalized(name_row, "charlie"));
+
     assert!(matches_filter(age_row, "age"));
+    assert!(matches_filter(age_row, "AGE"));
     assert!(matches_filter(age_row, "30"));
     assert!(!matches_filter(age_row, "alice"));
 }
@@ -386,4 +394,9 @@ fn test_workspace_tabs_and_navigation() {
     // Seleccionar pestaña específica
     assert!(ws.select_tab(&id1));
     assert_eq!(ws.active_index(), 0);
+
+    // Reordenar pestañas
+    assert!(ws.reorder_tabs(0, 1));
+    assert_eq!(ws.projects[0].id, id2);
+    assert_eq!(ws.projects[1].id, id1);
 }

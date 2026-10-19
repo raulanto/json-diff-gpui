@@ -321,6 +321,17 @@ impl Workspace {
         Some(new_id)
     }
 
+    /// Reordena una pestaña de la posición `from` a la posición `to`.
+    pub fn reorder_tabs(&mut self, from: usize, to: usize) -> bool {
+        if from < self.projects.len() && to < self.projects.len() && from != to {
+            let item = self.projects.remove(from);
+            self.projects.insert(to, item);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Obtiene la ruta predeterminada para persistencia del workspace en el sistema.
     pub fn default_storage_path() -> PathBuf {
         if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {

@@ -3,7 +3,7 @@
 use crate::core::loader::load_file;
 use crate::core::selector::JsonSelector;
 use crate::core::types::{Cell, DiffMode, Leaf, LoadedFile, Row, MAX_FILES, MIN_FILES};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Estructura principal que almacena el resultado de una comparación entre 2 y 10 archivos JSON.
@@ -42,15 +42,14 @@ impl Comparison {
     /// Reconstruye las filas de comparación filtrando las hojas según el selector provisto.
     pub fn rebuild_rows_with_selector(&mut self, selector: &JsonSelector) {
         let mut order: Vec<String> = Vec::new();
-        let mut seen: HashMap<String, usize> = HashMap::new();
+        let mut seen: HashSet<&str> = HashSet::new();
         let mut per_file: Vec<HashMap<&str, &Leaf>> = Vec::new();
 
         for f in &self.files {
             let mut m = HashMap::new();
             for leaf in &f.leaves {
                 if selector.matches(&leaf.path) {
-                    if !seen.contains_key(&leaf.path) {
-                        seen.insert(leaf.path.clone(), order.len());
+                    if seen.insert(leaf.path.as_str()) {
                         order.push(leaf.path.clone());
                     }
                     m.insert(leaf.path.as_str(), leaf);
@@ -212,13 +211,12 @@ pub fn compare_with_base(files: Vec<LoadedFile>, base_index: usize) -> Result<Co
 
     // Orden estable: rutas en orden de primera aparición, archivo por archivo.
     let mut order: Vec<String> = Vec::new();
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut seen: HashSet<&str> = HashSet::new();
     let mut per_file: Vec<HashMap<&str, &Leaf>> = Vec::new();
     for f in &files {
         let mut m = HashMap::new();
         for leaf in &f.leaves {
-            if !seen.contains_key(&leaf.path) {
-                seen.insert(leaf.path.clone(), order.len());
+            if seen.insert(leaf.path.as_str()) {
                 order.push(leaf.path.clone());
             }
             m.insert(leaf.path.as_str(), leaf);
@@ -285,17 +283,48 @@ pub fn compare_paths(paths: &[PathBuf]) -> Result<Comparison, String> {
     compare_paths_with_base(paths, 0)
 }
 
-/// Comprueba si una fila coincide con el texto de búsqueda (en la ruta o en algún valor).
-pub fn matches_filter(row: &Row, query: &str) -> bool {
-    let q = query.trim().to_lowercase();
-    if q.is_empty() {
+/// Búsqueda de subcadena case-insensitive sin alocaciones en heap para textos ASCII.
+#[inline]
+fn contains_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
+    if needle_lower.is_empty() {
         return true;
     }
-    if row.path.to_lowercase().contains(&q) {
+    if haystack.len() < needle_lower.len() {
+        return false;
+    }
+    if haystack.is_ascii() && needle_lower.is_ascii() {
+        let needle_bytes = needle_lower.as_bytes();
+        haystack
+            .as_bytes()
+            .windows(needle_bytes.len())
+            .any(|window| {
+                window
+                    .iter()
+                    .zip(needle_bytes.iter())
+                    .all(|(&h, &n)| h.to_ascii_lowercase() == n)
+            })
+    } else {
+        haystack.to_lowercase().contains(needle_lower)
+    }
+}
+
+/// Comprueba si una fila coincide con un query de búsqueda ya normalizado en minúsculas (zero-allocation).
+#[inline]
+pub fn matches_filter_normalized(row: &Row, query_lower: &str) -> bool {
+    if query_lower.is_empty() {
+        return true;
+    }
+    if contains_case_insensitive(&row.path, query_lower) {
         return true;
     }
     row.cells.iter().any(|c| match c {
-        Some(cell) => cell.value.to_lowercase().contains(&q),
-        None => "(no existe)".contains(&q),
+        Some(cell) => contains_case_insensitive(&cell.value, query_lower),
+        None => "(no existe)".contains(query_lower),
     })
+}
+
+/// Comprueba si una fila coincide con el texto de búsqueda (en la ruta o en algún valor).
+pub fn matches_filter(row: &Row, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    matches_filter_normalized(row, &q)
 }

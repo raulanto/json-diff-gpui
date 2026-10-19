@@ -60,6 +60,14 @@ pub struct DiffView {
 
     // Notificaciones / Toast
     pub(crate) status_toast: Option<SharedString>,
+
+    // Caché compartida de filas para renderizado virtualizado zero-copy (Arc)
+    pub(crate) cached_rows: std::sync::Arc<[jsondiff::Row]>,
+    pub(crate) cached_visible: std::sync::Arc<[usize]>,
+
+    // Epochs para debouncing de entradas de texto reactivas
+    pub(crate) selector_epoch: u64,
+    pub(crate) search_epoch: u64,
 }
 
 impl DiffView {
@@ -72,8 +80,27 @@ impl DiffView {
             if let InputEvent::Changed = event {
                 let query = entity.read(cx).text().to_string();
                 this.search_query = query;
-                this.refilter();
-                cx.notify();
+                this.search_epoch = this.search_epoch.wrapping_add(1);
+                let epoch = this.search_epoch;
+
+                if this.search_query.is_empty() {
+                    this.refilter();
+                    cx.notify();
+                } else {
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(100))
+                            .await;
+                        this.update(cx, |this, cx| {
+                            if this.search_epoch == epoch {
+                                this.refilter();
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                    })
+                    .detach();
+                }
             }
         });
 
@@ -86,9 +113,23 @@ impl DiffView {
                 |this, entity, event: &InputEvent, cx| match event {
                     InputEvent::Changed => {
                         let text = entity.read(cx).text().to_string();
-                        this.apply_selector(&text, false, cx);
+                        this.selector_epoch = this.selector_epoch.wrapping_add(1);
+                        let epoch = this.selector_epoch;
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(220))
+                                .await;
+                            this.update(cx, |this, cx| {
+                                if this.selector_epoch == epoch {
+                                    this.apply_selector(&text, false, cx);
+                                }
+                            })
+                            .ok();
+                        })
+                        .detach();
                     }
                     InputEvent::Submit => {
+                        this.selector_epoch = this.selector_epoch.wrapping_add(1);
                         let text = entity.read(cx).text().to_string();
                         this.apply_selector(&text, true, cx);
                     }
@@ -198,6 +239,10 @@ impl DiffView {
             renaming_project_id: None,
             focus_handle: cx.focus_handle(),
             status_toast: None,
+            cached_rows: std::sync::Arc::from([]),
+            cached_visible: std::sync::Arc::from([]),
+            selector_epoch: 0,
+            search_epoch: 0,
         };
 
         this.reload();

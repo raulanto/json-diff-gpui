@@ -3,16 +3,15 @@
 use crate::gui::DiffView;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, IconButton},
-    data_display::{Badge, Tone},
     forms::Input,
+    navigation::{EditorTab, EditorTabs},
     overlays::Dialog,
     primitives::{Icon, IconName},
-    theme::{ActiveTheme, ControlSize, IconSize, Mode, TextSize, Theme},
+    theme::{ActiveTheme, ControlSize, IconSize, Mode, Theme},
 };
 use gpui::{div, prelude::*, px, Context, Entity, IntoElement};
-use jsondiff::MIN_FILES;
 
-/// Renderiza la barra horizontal de pestañas de proyectos (Tabs) de comparación.
+/// Renderiza la barra horizontal de pestañas de proyectos con EditorTabs de Ely Components.
 pub fn render_project_bar(
     state: &DiffView,
     view: Entity<DiffView>,
@@ -25,147 +24,91 @@ pub fn render_project_bar(
         .active_project_id
         .clone()
         .unwrap_or_default();
-    let projects_count = state.workspace.projects.len();
 
-    let tabs = state
+    let editor_tabs: Vec<EditorTab> = state
         .workspace
         .projects
         .iter()
-        .enumerate()
-        .map(|(idx, proj)| {
-            let is_active = proj.id == active_id;
-            let proj_id = proj.id.clone();
-            let proj_name = proj.name.clone();
+        .map(|proj| {
             let paths_count = proj.paths.len();
-
-            let view_click = view.clone();
-            let view_close = view.clone();
-            let view_rename = view.clone();
-
-            let mut tab = div()
-                .id(("project_tab", idx))
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .py_1()
-                .cursor_pointer()
-                .rounded_t_md()
-                .text_size(theme.text_size(TextSize::Sm));
-
-            if is_active {
-                tab = tab
-                    .bg(colors.bg)
-                    .text_color(colors.fg)
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .border_t_2()
-                    .border_color(colors.accent);
+            let label = if paths_count > 0 {
+                format!("{} ({paths_count})", proj.name)
             } else {
-                tab = tab
-                    .bg(colors.sunken)
-                    .text_color(colors.fg_muted)
-                    .hover(|s| s.bg(colors.hover).text_color(colors.fg));
-            }
-
-            // Al hacer clic se cambia al proyecto
-            tab = tab.on_click(move |_, window, cx| {
-                view_click.update(cx, |this, cx| {
-                    this.switch_project_tab(&proj_id, window, cx);
-                });
-            });
-
-            // Icono de proyecto
-            tab = tab.child(Icon::new(if is_active {
-                IconName::FolderOpen
-            } else {
-                IconName::Folder
-            }));
-
-            // Nombre del proyecto
-            tab = tab.child(
-                div()
-                    .max_w(px(160.0))
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .child(proj_name),
-            );
-
-            // Contador de archivos
-            let badge_tone = if paths_count >= MIN_FILES {
-                Tone::Success
-            } else if paths_count == 1 {
-                Tone::Warning
-            } else {
-                Tone::Neutral
+                proj.name.clone()
             };
-            tab = tab.child(Badge::new(format!("{paths_count}")).tone(badge_tone).dot());
+            EditorTab::new(proj.id.clone(), label)
+                .icon(IconName::Folder)
+                .dirty(paths_count == 0)
+        })
+        .collect();
 
-            // Botón discreto para renombrar
-            let rename_id = proj.id.clone();
-            tab = tab.child(
-                IconButton::new(("btn_tab_rename", idx), IconName::Pencil)
-                    .size(ControlSize::Sm)
-                    .tooltip("Renombrar proyecto")
-                    .on_click(move |_, window, cx| {
-                        view_rename.update(cx, |this, cx| {
-                            this.open_rename_dialog(&rename_id, window, cx);
-                        });
-                    }),
-            );
+    let view_select = view.clone();
+    let view_close = view.clone();
+    let view_reorder = view.clone();
 
-            // Botón para cerrar pestaña (si hay más de 1 proyecto abierto)
-            if projects_count > 1 {
-                let close_id = proj.id.clone();
-                tab = tab.child(
-                    IconButton::new(("btn_tab_close", idx), IconName::X)
-                        .size(ControlSize::Sm)
-                        .tooltip("Cerrar pestaña")
-                        .on_click(move |_, window, cx| {
-                            view_close.update(cx, |this, cx| {
-                                this.close_project_tab(&close_id, window, cx);
-                            });
-                        }),
-                );
-            }
-
-            tab
+    let project_tabs = EditorTabs::new("workspace_project_tabs", editor_tabs)
+        .selected(active_id.clone())
+        .on_select(move |id, window, cx| {
+            let id_str = id.to_string();
+            view_select.update(cx, |this, cx| {
+                this.switch_project_tab(&id_str, window, cx);
+            });
+        })
+        .on_close(move |id, window, cx| {
+            let id_str = id.to_string();
+            view_close.update(cx, |this, cx| {
+                this.close_project_tab(&id_str, window, cx);
+            });
+        })
+        .on_reorder(move |from, to, _, cx| {
+            view_reorder.update(cx, |this, cx| {
+                this.reorder_project_tab(from, to, cx);
+            });
         });
 
     let view_new = view.clone();
+    let view_rename = view.clone();
     let view_save = view.clone();
     let view_load = view.clone();
     let view_dup = view.clone();
     let view_cmd = view.clone();
     let view_settings = view.clone();
 
+    let active_id_for_rename = if !active_id.is_empty() {
+        Some(active_id.clone())
+    } else {
+        None
+    };
+
     div()
         .id("project_bar")
         .flex()
+        .flex_row()
         .items_center()
         .justify_between()
-        .px_2()
-        .pt_1()
+        .w_full()
         .bg(colors.sunken)
         .border_b_1()
         .border_color(colors.border)
         .child(
             div()
-                .id("project_tabs_scroll_container")
+                .flex_1()
+                .min_w_0()
                 .flex()
+                .flex_row()
                 .items_center()
-                .gap_1()
-                .overflow_x_scroll()
-                .children(tabs)
-                // Botón Nueva Pestaña
+                .child(div().flex_1().min_w_0().child(project_tabs))
                 .child(
-                    IconButton::new("btn_new_project_tab", IconName::Plus)
-                        .size(ControlSize::Sm)
-                        .tooltip("Nueva pestaña de proyecto (Ctrl+T)")
-                        .on_click(move |_, window, cx| {
-                            view_new.update(cx, |this, cx| {
-                                this.new_project_tab(None, window, cx);
-                            });
-                        }),
+                    div().px_1().child(
+                        IconButton::new("btn_new_project_tab", IconName::Plus)
+                            .size(ControlSize::Sm)
+                            .tooltip("Nueva pestaña de proyecto (Ctrl+T)")
+                            .on_click(move |_, window, cx| {
+                                view_new.update(cx, |this, cx| {
+                                    this.new_project_tab(None, window, cx);
+                                });
+                            }),
+                    ),
                 ),
         )
         // Acciones de proyecto y controles globales de aplicación
@@ -175,6 +118,19 @@ pub fn render_project_bar(
                 .items_center()
                 .gap_1()
                 .py_1()
+                .when_some(active_id_for_rename, |bar, id| {
+                    let view_rename = view_rename.clone();
+                    bar.child(
+                        IconButton::new("btn_rename_project", IconName::Pencil)
+                            .size(ControlSize::Sm)
+                            .tooltip("Renombrar proyecto activo")
+                            .on_click(move |_, window, cx| {
+                                view_rename.update(cx, |this, cx| {
+                                    this.open_rename_dialog(&id, window, cx);
+                                });
+                            }),
+                    )
+                })
                 .child(
                     IconButton::new("btn_dup_project", IconName::Copy)
                         .size(ControlSize::Sm)

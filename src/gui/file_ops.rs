@@ -2,8 +2,9 @@
 
 use crate::gui::DiffView;
 use gpui::{Context, PathPromptOptions};
-use jsondiff::{compare_paths_with_base, matches_filter, MAX_FILES, MIN_FILES};
+use jsondiff::{compare_paths_with_base, matches_filter_normalized, MAX_FILES, MIN_FILES};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 impl DiffView {
     /// Recarga los archivos del disco y recalcula la comparación.
@@ -13,6 +14,7 @@ impl DiffView {
         if self.paths.is_empty() {
             self.comparison = None;
             self.visible.clear();
+            self.sync_render_cache();
             return;
         }
 
@@ -26,6 +28,7 @@ impl DiffView {
             );
             self.comparison = None;
             self.visible.clear();
+            self.sync_render_cache();
             return;
         }
 
@@ -39,6 +42,7 @@ impl DiffView {
             );
             self.comparison = None;
             self.visible.clear();
+            self.sync_render_cache();
             return;
         }
 
@@ -65,22 +69,38 @@ impl DiffView {
                 self.error = Some(e.into());
                 self.comparison = None;
                 self.visible.clear();
+                self.sync_render_cache();
             }
         }
     }
 
-    /// Recalcula los índices de filas visibles según el filtro de cambios y la búsqueda.
+    /// Sincroniza la caché compartida `Arc` para el render virtualizado de alta velocidad.
+    #[inline]
+    pub(crate) fn sync_render_cache(&mut self) {
+        if let Some(c) = &self.comparison {
+            self.cached_rows = Arc::from(c.rows.as_slice());
+        } else {
+            self.cached_rows = Arc::from([]);
+        }
+        self.cached_visible = Arc::from(self.visible.as_slice());
+    }
+
+    /// Recalcula los índices de filas visibles según el filtro de cambios y la búsqueda (zero-allocation).
     pub(crate) fn refilter(&mut self) {
         if let Some(c) = &self.comparison {
+            let q_norm = self.search_query.trim().to_lowercase();
+            let has_query = !q_norm.is_empty();
+            let only_changed = self.only_changed;
+
             self.visible = c
                 .rows
                 .iter()
                 .enumerate()
                 .filter(|(_, r)| {
-                    if self.only_changed && !r.changed {
+                    if only_changed && !r.changed {
                         return false;
                     }
-                    if !self.search_query.is_empty() && !matches_filter(r, &self.search_query) {
+                    if has_query && !matches_filter_normalized(r, &q_norm) {
                         return false;
                     }
                     true
@@ -90,6 +110,7 @@ impl DiffView {
         } else {
             self.visible.clear();
         }
+        self.sync_render_cache();
     }
 
     /// Actualiza la lista de archivos abiertos y recarga la comparación.
@@ -265,6 +286,7 @@ impl DiffView {
         self.paths.clear();
         self.comparison = None;
         self.visible.clear();
+        self.sync_render_cache();
         self.error = None;
         self.editor = None;
         self.search_query.clear();
