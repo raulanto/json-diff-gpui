@@ -129,12 +129,26 @@ impl DiffView {
         let project_rename_input =
             cx.new(|cx| TextInput::new(window, cx).placeholder("Nombre del proyecto…"));
 
-        let project_rename_sub =
-            cx.subscribe(&project_rename_input, |_, _, event: &InputEvent, cx| {
-                if let InputEvent::Changed = event {
+        let project_rename_sub = cx.subscribe(
+            &project_rename_input,
+            |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Changed => {
                     cx.notify();
                 }
-            });
+                InputEvent::Submit => {
+                    if let Some(id) = this.renaming_project_id.take() {
+                        let new_name = this.project_rename_input.read(cx).text().trim().to_string();
+                        if !new_name.is_empty() {
+                            this.workspace.rename_project(&id, new_name.clone());
+                            let _ = this.workspace.save_to_disk();
+                            this.show_toast(format!("Proyecto renombrado a: {new_name}"), cx);
+                            cx.notify();
+                        }
+                    }
+                }
+                _ => {}
+            },
+        );
 
         let mut workspace =
             Workspace::load_from_disk().unwrap_or_else(|_| Workspace::default_initial());

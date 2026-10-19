@@ -4,9 +4,10 @@ use crate::gui::DiffView;
 use ely_gpui_component::{
     buttons::{Button, ButtonVariant, IconButton},
     data_display::{Badge, Tone},
+    forms::Input,
     overlays::Dialog,
     primitives::{Icon, IconName},
-    theme::{ActiveTheme, ControlSize, Mode, TextSize, Theme},
+    theme::{ActiveTheme, ControlSize, IconSize, Mode, TextSize, Theme},
 };
 use gpui::{div, prelude::*, px, Context, Entity, IntoElement};
 use jsondiff::MIN_FILES;
@@ -261,8 +262,10 @@ pub fn render_project_bar(
 pub fn render_rename_dialog(
     state: &DiffView,
     view: Entity<DiffView>,
-    _cx: &mut Context<DiffView>,
+    cx: &mut Context<DiffView>,
 ) -> impl IntoElement {
+    let theme = cx.theme();
+    let colors = &theme.colors;
     let view_close = view.clone();
     let view_confirm = view.clone();
 
@@ -280,39 +283,50 @@ pub fn render_rename_dialog(
         div()
             .flex()
             .flex_col()
-            .gap_4()
+            .gap_2()
+            .py_2()
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(state.project_rename_input.clone()),
+                    .text_xs()
+                    .text_color(colors.fg_muted)
+                    .child("Nombre del proyecto"),
             )
             .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("btn_cancel_rename", "Cancelar")
-                            .variant(ButtonVariant::Ghost)
-                            .on_click(move |_, _, cx| {
-                                view_close.update(cx, |this, cx| {
-                                    this.renaming_project_id = None;
-                                    cx.notify();
-                                });
-                            }),
+                Input::new(&state.project_rename_input)
+                    .size(ControlSize::Md)
+                    .prefix(
+                        Icon::new(IconName::Pencil)
+                            .size(IconSize::Sm)
+                            .color(colors.fg_muted),
                     )
-                    .child(
-                        Button::new("btn_confirm_rename", "Guardar Nombre")
-                            .variant(ButtonVariant::Primary)
-                            .icon(IconName::Check)
-                            .on_click(move |_, window, cx| {
-                                view_confirm.update(cx, |this, cx| {
-                                    this.confirm_rename_project(window, cx);
-                                });
-                            }),
-                    ),
+                    .clearable(),
             ),
     )
+    .action({
+        let view = view_close.clone();
+        move |close| {
+            Button::new("btn_cancel_rename", "Cancelar")
+                .variant(ButtonVariant::Ghost)
+                .on_click(move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.renaming_project_id = None;
+                        cx.notify();
+                    });
+                    close(window, cx);
+                })
+        }
+    })
+    .action({
+        let view = view_confirm.clone();
+        move |_close| {
+            Button::new("btn_confirm_rename", "Guardar Nombre")
+                .variant(ButtonVariant::Primary)
+                .icon(IconName::Check)
+                .on_click(move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.confirm_rename_project(window, cx);
+                    });
+                })
+        }
+    })
 }

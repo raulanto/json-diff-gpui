@@ -8,17 +8,16 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
 
 ## Arquitectura
 
-- `src/lib.rs` (crate `jsondiff`): **toda la lógica**. Sin dependencia de GPUI.
-  - `flatten` renderiza el JSON con el mismo formato que `serde_json::to_string_pretty` y devuelve hojas `Leaf { path, line, value }`.
-  - `load_file_from_str` parsea texto en memoria preservando el contenido original.
-  - `format_json` indenta y normaliza JSON a 2 espacios.
-  - `validate_json` comprueba la sintaxis JSON sin dependencias gráficas.
-  - `detect_json_type` y `is_type_change` clasifican tipos de datos y detectan mutaciones entre versiones (e.g. string vs número).
-  - `JsonSelector`, `PathSegment`, `SelectorPattern`: lenguaje extractor estilo JSONPath (`$`, `$.data`, `$.items[*]`, `$.items[*].id`, `$..id`, `$.data, $.meta`) para acotar la comparación a subestructuras específicas.
-  - `compare_with_base` une rutas en orden de primera aparición y marca `Row.changed` respecto a la base seleccionada.
-  - `matches_filter` filtra filas por ruta o valor.
-  - `export_markdown` y `export_csv` generan reportes tabulares estructurados.
-  - `text_report` alimenta el modo `--cli`.
+- `src/lib.rs` y `src/core/` (crate `jsondiff`): **toda la lógica del dominio**, agnóstica de GPUI. Arquitectura modular desacoplada:
+  - `src/core/types.rs`: modelos de dominio (`LoadedFile`, `Leaf`, `Cell`, `Row`, `DiffMode`, `JsonType`, constantes `MIN_FILES` / `MAX_FILES`).
+  - `src/core/flatten.rs`: normalización y aplanado (`flatten`, `walk`, `scalar`, `join_key`) con formato exacto de `serde_json::to_string_pretty`.
+  - `src/core/loader.rs`: parsing en memoria (`load_file_from_str`), carga desde disco (`load_file`), formateo normalizado a 2 espacios (`format_json`) y validación sintáctica (`validate_json`).
+  - `src/core/selector.rs`: motor extractor estilo JSONPath (`JsonSelector`, `PathSegment`, `SelectorPattern`) con comodines `*`, arrays `[i]`, comodines de array `[*]`, descenso recursivo `..` / `**` y unión `,`.
+  - `src/core/comparison.rs`: motor de comparación matricial (`Comparison`, `compare_with_base`, `compare_sequential`), reordenamiento de columnas (`move_file`, `swap_files`), base dinámica y filtro de búsqueda (`matches_filter`).
+  - `src/core/report.rs`: generadores estructurados de reportes CLI (`text_report`), Markdown enriquecido (`export_markdown`) y CSV (`export_csv`).
+  - `src/core/project.rs`: sistema de sesiones y espacios de trabajo (`Project`, `Workspace`) con gestión de pestañas y persistencia atómica en disco JSON.
+  - `src/core/tests.rs`: suite completa de pruebas unitarias agnósticas de GUI.
+  - `src/lib.rs`: orquestador raíz que re-exporta toda la API pública de `core` manteniendo 100% de compatibilidad hacia atrás.
 - `src/gui.rs` y `src/gui/`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Arquitectura modular desacoplada:
   - `src/gui.rs`: orquestador de ciclo de vida, estado (`DiffView`), carga de archivos y dispatch principal de render.
   - `src/gui/types.rs`: enums y structs de presentación (`Density`, `ViewMode`, `SettingsTab`).
