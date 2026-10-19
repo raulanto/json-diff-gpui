@@ -46,5 +46,6 @@ pub enum ViewMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsTab {
     General,
+    Projects,
     Shortcuts,
 }

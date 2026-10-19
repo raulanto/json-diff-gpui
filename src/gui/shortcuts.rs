@@ -88,9 +88,34 @@ pub fn shortcuts_list() -> Vec<Shortcut> {
             keys: "secondary-s".into(),
         },
         Shortcut {
+            group: "Proyectos & Pestañas".into(),
+            name: "Nueva pestaña de proyecto".into(),
+            keys: "secondary-t".into(),
+        },
+        Shortcut {
+            group: "Proyectos & Pestañas".into(),
+            name: "Cerrar pestaña de proyecto".into(),
+            keys: "secondary-w".into(),
+        },
+        Shortcut {
+            group: "Proyectos & Pestañas".into(),
+            name: "Siguiente pestaña de proyecto".into(),
+            keys: "secondary-tab".into(),
+        },
+        Shortcut {
+            group: "Proyectos & Pestañas".into(),
+            name: "Pestaña de proyecto anterior".into(),
+            keys: "secondary-shift-tab".into(),
+        },
+        Shortcut {
+            group: "Proyectos & Pestañas".into(),
+            name: "Guardar proyecto a archivo JSON".into(),
+            keys: "secondary-shift-s".into(),
+        },
+        Shortcut {
             group: "Personalización".into(),
             name: "Alternar tema (Claro / Oscuro)".into(),
-            keys: "secondary-t".into(),
+            keys: "secondary-shift-t".into(),
         },
     ]
 }
@@ -222,6 +247,39 @@ pub fn run_command_action(
             Theme::set_mode(next, cx);
             cx.notify();
         }
+        "new_project" => {
+            state.new_project_tab(None, window, cx);
+        }
+        "close_project" => {
+            if let Some(active_id) = state.workspace.active_project_id.clone() {
+                state.close_project_tab(&active_id, window, cx);
+            }
+        }
+        "next_project_tab" => {
+            state.sync_current_project_state();
+            state.workspace.next_tab();
+            state.load_active_project(window, cx);
+        }
+        "prev_project_tab" => {
+            state.sync_current_project_state();
+            state.workspace.prev_tab();
+            state.load_active_project(window, cx);
+        }
+        "duplicate_project" => {
+            state.duplicate_current_project(window, cx);
+        }
+        "save_project_file" => {
+            state.save_project_to_file(cx);
+        }
+        "load_project_file" => {
+            state.load_project_from_file(window, cx);
+        }
+        "export_workspace" => {
+            state.export_workspace_dialog(cx);
+        }
+        "import_workspace" => {
+            state.import_workspace_dialog(window, cx);
+        }
         _ => {}
     }
 }
@@ -351,6 +409,44 @@ pub fn handle_global_key(
     }
 
     if ctrl_or_cmd && key.eq_ignore_ascii_case("t") && !shift {
+        state.new_project_tab(None, window, cx);
+        return true;
+    }
+
+    if ctrl_or_cmd && key.eq_ignore_ascii_case("w") && !shift {
+        if state.workspace.projects.len() > 1 {
+            if let Some(active_id) = state.workspace.active_project_id.clone() {
+                state.close_project_tab(&active_id, window, cx);
+                return true;
+            }
+        }
+    }
+
+    if ctrl_or_cmd
+        && (key.eq_ignore_ascii_case("tab") || key.eq_ignore_ascii_case("pagedown"))
+        && !shift
+    {
+        state.sync_current_project_state();
+        state.workspace.next_tab();
+        state.load_active_project(window, cx);
+        return true;
+    }
+
+    if ctrl_or_cmd
+        && (key.eq_ignore_ascii_case("tab") && shift || key.eq_ignore_ascii_case("pageup"))
+    {
+        state.sync_current_project_state();
+        state.workspace.prev_tab();
+        state.load_active_project(window, cx);
+        return true;
+    }
+
+    if ctrl_or_cmd && shift && key.eq_ignore_ascii_case("s") {
+        state.save_project_to_file(cx);
+        return true;
+    }
+
+    if ctrl_or_cmd && shift && key.eq_ignore_ascii_case("t") {
         let next = if cx.theme().is_dark() {
             Mode::Light
         } else {

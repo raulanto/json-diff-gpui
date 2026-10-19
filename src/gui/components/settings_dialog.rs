@@ -7,7 +7,7 @@ use ely_gpui_component::{
     buttons::{Button, ButtonVariant, IconButton, SegmentedControl},
     data_display::{Badge, Tone},
     overlays::Dialog,
-    primitives::IconName,
+    primitives::{Icon, IconName},
     settings::{KeyboardShortcutsList, SettingsRow, SettingsSection},
     theme::{ActiveTheme, ControlSize, Mode, TextSize, Theme},
 };
@@ -301,6 +301,263 @@ pub fn render_settings_dialog(
                 })
                 .into_any_element()
         }
+        SettingsTab::Projects => {
+            let active_id = state
+                .workspace
+                .active_project_id
+                .clone()
+                .unwrap_or_default();
+            let view_new_proj = view.clone();
+            let view_export = view.clone();
+            let view_import = view.clone();
+
+            div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(
+                    SettingsSection::new("Proyectos de Comparación")
+                        .description(
+                            "Organiza diferentes conjuntos de archivos JSON en sesiones independientes para reutilizarlas.",
+                        )
+                        .row(
+                            SettingsRow::new("Crear nuevo proyecto")
+                                .description(
+                                    "Inicia una sesión limpia de comparación en una nueva pestaña (Ctrl+T).",
+                                )
+                                .control(
+                                    Button::new("btn_new_proj_settings", "Nuevo Proyecto")
+                                        .size(ControlSize::Sm)
+                                        .variant(ButtonVariant::Primary)
+                                        .icon(IconName::Plus)
+                                        .on_click(move |_, window, cx| {
+                                            view_new_proj.update(cx, |this, cx| {
+                                                this.new_project_tab(None, window, cx);
+                                                this.show_settings = false;
+                                            });
+                                        }),
+                                ),
+                        )
+                        .row(
+                            SettingsRow::new("Copia de seguridad del espacio de trabajo")
+                                .description(
+                                    "Exporta todos los proyectos a un archivo JSON o importa un workspace guardado.",
+                                )
+                                .control(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("btn_export_ws", "Exportar Workspace…")
+                                                .size(ControlSize::Sm)
+                                                .variant(ButtonVariant::Outline)
+                                                .icon(IconName::Save)
+                                                .on_click(move |_, _, cx| {
+                                                    view_export.update(cx, |this, cx| {
+                                                        this.export_workspace_dialog(cx);
+                                                    });
+                                                }),
+                                        )
+                                        .child(
+                                            Button::new("btn_import_ws", "Importar Workspace…")
+                                                .size(ControlSize::Sm)
+                                                .variant(ButtonVariant::Outline)
+                                                .icon(IconName::FolderOpen)
+                                                .on_click(move |_, window, cx| {
+                                                    view_import.update(cx, |this, cx| {
+                                                        this.import_workspace_dialog(window, cx);
+                                                    });
+                                                }),
+                                        ),
+                                ),
+                        ),
+                )
+                .child({
+                    let projects_list = state
+                        .workspace
+                        .projects
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, proj)| {
+                            let is_active = proj.id == active_id;
+                            let proj_id = proj.id.clone();
+                            let proj_name = proj.name.clone();
+                            let paths_len = proj.paths.len();
+
+                            let view_activate = view.clone();
+                            let view_rename = view.clone();
+                            let view_dup = view.clone();
+                            let view_del = view.clone();
+
+                            let rename_id = proj.id.clone();
+                            let dup_id = proj.id.clone();
+                            let del_id = proj.id.clone();
+
+                            div()
+                                .id(("settings_proj_row", idx))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_3()
+                                .p_3()
+                                .rounded_md()
+                                .bg(if is_active {
+                                    colors.surface
+                                } else {
+                                    colors.sunken
+                                })
+                                .border_1()
+                                .border_color(if is_active {
+                                    colors.accent
+                                } else {
+                                    colors.border
+                                })
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .child(
+                                            div()
+                                                .text_color(if is_active {
+                                                    colors.accent
+                                                } else {
+                                                    colors.fg_muted
+                                                })
+                                                .child(
+                                                    Icon::new(if is_active {
+                                                        IconName::FolderOpen
+                                                    } else {
+                                                        IconName::Folder
+                                                    })
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_0p5()
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap_2()
+                                                        .child(
+                                                            div()
+                                                                .font_weight(
+                                                                    gpui::FontWeight::SEMIBOLD,
+                                                                )
+                                                                .text_size(
+                                                                    theme.text_size(TextSize::Sm),
+                                                                )
+                                                                .text_color(colors.fg)
+                                                                .child(proj_name),
+                                                        )
+                                                        .when(is_active, |el| {
+                                                            el.child(
+                                                                Badge::new("Activo")
+                                                                    .tone(Tone::Accent),
+                                                            )
+                                                        }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_size(
+                                                            theme.text_size(TextSize::Xs),
+                                                        )
+                                                        .text_color(colors.fg_muted)
+                                                        .child(format!(
+                                                            "{paths_len} archivo(s) JSON • Selector: '{}' • Modo: {:?}",
+                                                            proj.selector, proj.diff_mode
+                                                        )),
+                                                ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .when(!is_active, |el| {
+                                            el.child(
+                                                Button::new(("btn_open_proj", idx), "Abrir")
+                                                    .size(ControlSize::Sm)
+                                                    .variant(ButtonVariant::Primary)
+                                                    .on_click(move |_, window, cx| {
+                                                        view_activate.update(cx, |this, cx| {
+                                                            this.switch_project_tab(
+                                                                &proj_id, window, cx,
+                                                            );
+                                                            this.show_settings = false;
+                                                        });
+                                                    }),
+                                            )
+                                        })
+                                        .child(
+                                            IconButton::new(
+                                                ("btn_settings_rename", idx),
+                                                IconName::Pencil,
+                                            )
+                                            .size(ControlSize::Sm)
+                                            .tooltip("Renombrar")
+                                            .on_click(move |_, window, cx| {
+                                                view_rename.update(cx, |this, cx| {
+                                                    this.open_rename_dialog(
+                                                        &rename_id, window, cx,
+                                                    );
+                                                });
+                                            }),
+                                        )
+                                        .child(
+                                            IconButton::new(
+                                                ("btn_settings_dup", idx),
+                                                IconName::Copy,
+                                            )
+                                            .size(ControlSize::Sm)
+                                            .tooltip("Duplicar")
+                                            .on_click(move |_, _window, cx| {
+                                                view_dup.update(cx, |this, cx| {
+                                                    this.workspace.duplicate_project(&dup_id);
+                                                    this.show_toast(
+                                                        "Proyecto duplicado",
+                                                        cx,
+                                                    );
+                                                    cx.notify();
+                                                });
+                                            }),
+                                        )
+                                        .when(state.workspace.projects.len() > 1, |el| {
+                                            el.child(
+                                                IconButton::new(
+                                                    ("btn_settings_del", idx),
+                                                    IconName::Trash2,
+                                                )
+                                                .size(ControlSize::Sm)
+                                                .tooltip("Eliminar proyecto")
+                                                .on_click(move |_, window, cx| {
+                                                    view_del.update(cx, |this, cx| {
+                                                        this.close_project_tab(
+                                                            &del_id, window, cx,
+                                                        );
+                                                    });
+                                                }),
+                                            )
+                                        }),
+                                )
+                        });
+
+                    div()
+                        .id("settings_projects_scroll_container")
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .max_h(px(280.0))
+                        .overflow_y_scroll()
+                        .children(projects_list)
+                })
+                .into_any_element()
+        }
         SettingsTab::Shortcuts => div()
             .flex()
             .flex_col()
@@ -336,7 +593,7 @@ pub fn render_settings_dialog(
             });
         }
     })
-    .detail("Preferencias visuales, modo de comparación y catálogo de atajos de teclado.")
+    .detail("Preferencias visuales, proyectos y catálogo de atajos de teclado.")
     .child(
         div()
             .flex()
@@ -347,6 +604,7 @@ pub fn render_settings_dialog(
                     "settings_tab_select",
                     match state.settings_tab {
                         SettingsTab::General => "general",
+                        SettingsTab::Projects => "projects",
                         SettingsTab::Shortcuts => "shortcuts",
                     },
                 )
@@ -356,12 +614,13 @@ pub fn render_settings_dialog(
                     "General y Preferencias",
                     Some(IconName::Settings),
                 )
+                .segment("projects", "Proyectos Guardados", Some(IconName::Folder))
                 .segment("shortcuts", "Atajos de Teclado", Some(IconName::Keyboard))
                 .on_change(move |val, _, cx| {
-                    let tab = if val.as_ref() == "shortcuts" {
-                        SettingsTab::Shortcuts
-                    } else {
-                        SettingsTab::General
+                    let tab = match val.as_ref() {
+                        "projects" => SettingsTab::Projects,
+                        "shortcuts" => SettingsTab::Shortcuts,
+                        _ => SettingsTab::General,
                     };
                     view_tabs.update(cx, |this, cx| {
                         this.settings_tab = tab;

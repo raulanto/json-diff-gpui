@@ -24,7 +24,7 @@ use gpui::{
 };
 use jsondiff::{
     compare_paths_with_base, compare_with_base, format_json, load_file_from_str, matches_filter,
-    validate_json, Comparison, MAX_FILES, MIN_FILES,
+    validate_json, Comparison, DiffMode, Project, Workspace, MAX_FILES, MIN_FILES,
 };
 use std::path::PathBuf;
 
@@ -66,6 +66,12 @@ pub struct DiffView {
     pub(crate) settings_tab: SettingsTab,
     pub(crate) settings_shortcuts_search: Entity<TextInput>,
     pub(crate) _settings_sub: Subscription,
+
+    // Espacio de trabajo multi-proyecto y pestañas
+    pub(crate) workspace: Workspace,
+    pub(crate) project_rename_input: Entity<TextInput>,
+    pub(crate) _project_rename_sub: Subscription,
+    pub(crate) renaming_project_id: Option<String>,
 
     // Foco global para captura de atajos
     pub(crate) focus_handle: FocusHandle,
@@ -120,13 +126,60 @@ impl DiffView {
             },
         );
 
+        let project_rename_input =
+            cx.new(|cx| TextInput::new(window, cx).placeholder("Nombre del proyecto…"));
+
+        let project_rename_sub =
+            cx.subscribe(&project_rename_input, |_, _, event: &InputEvent, cx| {
+                if let InputEvent::Changed = event {
+                    cx.notify();
+                }
+            });
+
+        let mut workspace =
+            Workspace::load_from_disk().unwrap_or_else(|_| Workspace::default_initial());
+
+        let initial_paths = if !paths.is_empty() {
+            if let Some(proj) = workspace.active_project_mut() {
+                proj.paths = paths.clone();
+            }
+            paths
+        } else if let Some(proj) = workspace.active_project() {
+            proj.paths.clone()
+        } else {
+            Vec::new()
+        };
+
+        let initial_only_changed = workspace
+            .active_project()
+            .map(|p| p.only_changed)
+            .unwrap_or(true);
+        let initial_selector = workspace
+            .active_project()
+            .map(|p| p.selector.clone())
+            .unwrap_or_else(|| "$".to_string());
+        let initial_diff_mode = workspace
+            .active_project()
+            .map(|p| p.diff_mode)
+            .unwrap_or(DiffMode::FixedBase);
+        let initial_base_index = workspace
+            .active_project()
+            .map(|p| p.base_index)
+            .unwrap_or(0);
+
+        if initial_selector != "$" {
+            selector_input.update(cx, |input, cx| {
+                input.set_text(&initial_selector, cx);
+            });
+        }
+
         let mut this = Self {
-            paths,
+            paths: initial_paths,
             comparison: None,
             error: None,
             view_mode: ViewMode::Table,
             density: Density::Compact,
-            only_changed: true,
+            only_changed: initial_only_changed,
             search_query: String::new(),
             search_input,
             _search_sub: search_sub,
@@ -143,11 +196,21 @@ impl DiffView {
             settings_tab: SettingsTab::General,
             settings_shortcuts_search,
             _settings_sub: settings_sub,
+            workspace,
+            project_rename_input,
+            _project_rename_sub: project_rename_sub,
+            renaming_project_id: None,
             focus_handle: cx.focus_handle(),
             status_toast: None,
         };
 
         this.reload();
+        if let Some(c) = &mut this.comparison {
+            c.set_diff_mode(initial_diff_mode);
+            let _ = c.set_selector(&initial_selector);
+            let _ = c.set_base_index(initial_base_index);
+            this.refilter();
+        }
         this
     }
 
@@ -238,6 +301,7 @@ impl DiffView {
         paths.truncate(MAX_FILES);
         self.paths = paths;
         self.reload();
+        self.sync_current_project_state();
         cx.notify();
     }
 
@@ -261,6 +325,7 @@ impl DiffView {
         }
         if added > 0 {
             self.reload();
+            self.sync_current_project_state();
             self.show_toast(
                 format!(
                     "{added} archivo(s) agregado(s). Total: {} de {MAX_FILES}",
@@ -392,6 +457,7 @@ impl DiffView {
                     self.paths.insert(to, item);
                 }
                 self.refilter();
+                self.sync_current_project_state();
                 self.show_toast(format!("Archivo movido a la posición [{}]", to + 1), cx);
                 cx.notify();
             }
@@ -409,6 +475,7 @@ impl DiffView {
         self.search_input.update(cx, |input, cx| {
             input.set_text("", cx);
         });
+        self.sync_current_project_state();
         self.show_toast("Archivos limpiados", cx);
         cx.notify();
     }
@@ -422,9 +489,284 @@ impl DiffView {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| format!("archivo {}", idx + 1));
             self.reload();
+            self.sync_current_project_state();
             self.show_toast(format!("Descartado: {name}"), cx);
             cx.notify();
         }
+    }
+
+    /// Sincroniza el estado visual actual con el proyecto activo en el Workspace.
+    pub(crate) fn sync_current_project_state(&mut self) {
+        if let Some(proj) = self.workspace.active_project_mut() {
+            proj.paths = self.paths.clone();
+            proj.only_changed = self.only_changed;
+            proj.selector = self
+                .comparison
+                .as_ref()
+                .map(|c| c.selector.clone())
+                .unwrap_or_else(|| "$".to_string());
+            if let Some(c) = &self.comparison {
+                proj.diff_mode = c.diff_mode;
+                proj.base_index = c.base_index;
+            }
+            proj.touch();
+        }
+        let _ = self.workspace.save_to_disk();
+    }
+
+    /// Carga el proyecto activo del Workspace en la vista.
+    pub(crate) fn load_active_project(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(proj) = self.workspace.active_project() {
+            self.paths = proj.paths.clone();
+            self.only_changed = proj.only_changed;
+            let sel = proj.selector.clone();
+            let mode = proj.diff_mode;
+            let base = proj.base_index;
+
+            self.selector_input.update(cx, |input, cx| {
+                input.set_text(if sel == "$" { "" } else { &sel }, cx);
+            });
+
+            self.editor = None;
+            self.reload();
+
+            if let Some(c) = &mut self.comparison {
+                c.set_diff_mode(mode);
+                let _ = c.set_selector(&sel);
+                let _ = c.set_base_index(base);
+                self.refilter();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Cambia a otra pestaña de proyecto por su ID.
+    pub(crate) fn switch_project_tab(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.workspace.active_project_id.as_deref() == Some(id) {
+            return;
+        }
+        self.sync_current_project_state();
+        if self.workspace.select_tab(id) {
+            self.load_active_project(window, cx);
+            if let Some(proj) = self.workspace.active_project() {
+                self.show_toast(format!("Pestaña: {}", proj.name), cx);
+            }
+        }
+    }
+
+    /// Crea una nueva pestaña de proyecto y la activa.
+    pub(crate) fn new_project_tab(
+        &mut self,
+        name: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_current_project_state();
+        let proj_name = {
+            let p = self.workspace.new_tab(name);
+            p.name.clone()
+        };
+        self.load_active_project(window, cx);
+        self.show_toast(format!("Nuevo proyecto: {proj_name}"), cx);
+    }
+
+    /// Cierra una pestaña de proyecto.
+    pub(crate) fn close_project_tab(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_current_project_state();
+        if let Some(removed) = self.workspace.close_tab(id) {
+            self.load_active_project(window, cx);
+            self.show_toast(format!("Pestaña cerrada: {}", removed.name), cx);
+        }
+    }
+
+    /// Duplica el proyecto activo actual creando una copia en nueva pestaña.
+    pub(crate) fn duplicate_current_project(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_current_project_state();
+        if let Some(active_id) = self.workspace.active_project_id.clone() {
+            if self.workspace.duplicate_project(&active_id).is_some() {
+                self.load_active_project(window, cx);
+                self.show_toast("Proyecto duplicado en nueva pestaña", cx);
+            }
+        }
+    }
+
+    /// Abre el diálogo para renombrar un proyecto.
+    pub(crate) fn open_rename_dialog(
+        &mut self,
+        proj_id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(proj) = self.workspace.projects.iter().find(|p| p.id == proj_id) {
+            let name = proj.name.clone();
+            self.project_rename_input.update(cx, |input, cx| {
+                input.set_text(&name, cx);
+            });
+            self.renaming_project_id = Some(proj_id.to_string());
+            cx.notify();
+        }
+    }
+
+    /// Confirma el nuevo nombre del proyecto que se está renombrando.
+    pub(crate) fn confirm_rename_project(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.renaming_project_id.take() {
+            let new_name = self.project_rename_input.read(cx).text().trim().to_string();
+            if !new_name.is_empty() {
+                self.workspace.rename_project(&id, new_name.clone());
+                let _ = self.workspace.save_to_disk();
+                self.show_toast(format!("Proyecto renombrado a: {new_name}"), cx);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Guarda el proyecto activo en un archivo JSON en disco (Exportar proyecto).
+    pub(crate) fn save_project_to_file(&mut self, cx: &mut Context<Self>) {
+        self.sync_current_project_state();
+        let active = match self.workspace.active_project() {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        let suggested = format!("{}.jsondiff.json", active.name.replace(' ', "_"));
+        let default_path = PathBuf::from(&suggested);
+        let rx = cx.prompt_for_new_path(&default_path, None);
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(path))) = res {
+                if let Err(e) = active.save_to_file(&path) {
+                    this.update(cx, |this, cx| {
+                        this.show_toast(format!("Error al guardar proyecto: {e}"), cx);
+                    })
+                    .ok();
+                } else {
+                    this.update(cx, |this, cx| {
+                        this.show_toast(format!("Proyecto guardado en: {}", path.display()), cx);
+                    })
+                    .ok();
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Carga un proyecto desde un archivo JSON (Importar proyecto).
+    pub(crate) fn load_project_from_file(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Selecciona un archivo de proyecto JSON (*.json)".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(paths))) = res {
+                if let Some(first) = paths.first() {
+                    match Project::load_from_file(first) {
+                        Ok(proj) => {
+                            this.update(cx, |this, cx| {
+                                let name = proj.name.clone();
+                                this.workspace.add_project(proj);
+                                this.paths = this
+                                    .workspace
+                                    .active_project()
+                                    .map(|p| p.paths.clone())
+                                    .unwrap_or_default();
+                                this.reload();
+                                this.show_toast(format!("Proyecto importado: {name}"), cx);
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                        Err(e) => {
+                            this.update(cx, |this, cx| {
+                                this.show_toast(format!("Error al importar proyecto: {e}"), cx);
+                            })
+                            .ok();
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Exporta todo el workspace a un archivo JSON de respaldo.
+    pub(crate) fn export_workspace_dialog(&mut self, cx: &mut Context<Self>) {
+        self.sync_current_project_state();
+        let ws = self.workspace.clone();
+        let default_path = PathBuf::from("workspace.jsondiff.json");
+        let rx = cx.prompt_for_new_path(&default_path, None);
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(path))) = res {
+                if let Err(e) = ws.export_to_file(&path) {
+                    this.update(cx, |this, cx| {
+                        this.show_toast(format!("Error al exportar workspace: {e}"), cx);
+                    })
+                    .ok();
+                } else {
+                    this.update(cx, |this, cx| {
+                        this.show_toast("Espacio de trabajo exportado con éxito", cx);
+                    })
+                    .ok();
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Importa todo el workspace desde un archivo JSON.
+    pub(crate) fn import_workspace_dialog(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Selecciona un archivo de espacio de trabajo (*.json)".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let res = rx.await;
+            if let Ok(Ok(Some(paths))) = res {
+                if let Some(first) = paths.first() {
+                    match Workspace::import_from_file(first) {
+                        Ok(ws) => {
+                            this.update(cx, |this, cx| {
+                                this.workspace = ws;
+                                this.paths = this
+                                    .workspace
+                                    .active_project()
+                                    .map(|p| p.paths.clone())
+                                    .unwrap_or_default();
+                                this.reload();
+                                this.show_toast("Espacio de trabajo importado con éxito", cx);
+                                cx.notify();
+                            })
+                            .ok();
+                        }
+                        Err(e) => {
+                            this.update(cx, |this, cx| {
+                                this.show_toast(format!("Error al importar workspace: {e}"), cx);
+                            })
+                            .ok();
+                        }
+                    }
+                }
+            }
+        })
+        .detach();
     }
 
     /// Muestra un mensaje flotante (toast) con auto-ocultamiento.
@@ -746,6 +1088,16 @@ impl gpui::Render for DiffView {
             None
         };
 
+        let project_bar = components::project_bar::render_project_bar(self, view.clone(), cx);
+        let rename_modal = if self.renaming_project_id.is_some() {
+            Some(
+                components::project_bar::render_rename_dialog(self, view.clone(), cx)
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+
         let theme = cx.theme();
         let colors = &theme.colors;
 
@@ -777,10 +1129,12 @@ impl gpui::Render for DiffView {
                     this.add_paths(dropped, cx);
                 }
             }))
+            .child(project_bar)
             .child(toolbar)
             .child(body)
             .children(cmd_palette)
             .children(settings_modal)
+            .children(rename_modal)
     }
 }
 

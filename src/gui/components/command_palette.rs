@@ -94,6 +94,33 @@ pub fn render_command_palette(view: Entity<DiffView>) -> impl IntoElement {
         ],
     )
     .group(
+        "Proyectos y Pestañas",
+        vec![
+            Command::new("new_project", "Nueva pestaña de proyecto")
+                .icon(IconName::Plus)
+                .keys("secondary-t"),
+            Command::new("close_project", "Cerrar pestaña de proyecto")
+                .icon(IconName::X)
+                .keys("secondary-w"),
+            Command::new("next_project_tab", "Siguiente pestaña de proyecto")
+                .icon(IconName::ArrowRight)
+                .keys("secondary-tab"),
+            Command::new("prev_project_tab", "Pestaña de proyecto anterior")
+                .icon(IconName::ArrowLeft)
+                .keys("secondary-shift-tab"),
+            Command::new("duplicate_project", "Duplicar proyecto activo").icon(IconName::Copy),
+            Command::new("save_project_file", "Guardar proyecto a archivo JSON…")
+                .icon(IconName::Save)
+                .keys("secondary-shift-s"),
+            Command::new("load_project_file", "Cargar proyecto desde archivo JSON…")
+                .icon(IconName::FolderOpen),
+            Command::new("export_workspace", "Exportar espacio de trabajo completo")
+                .icon(IconName::Save),
+            Command::new("import_workspace", "Importar espacio de trabajo completo")
+                .icon(IconName::FolderOpen),
+        ],
+    )
+    .group(
         "Configuración y Preferencias",
         vec![
             Command::new("open_settings", "Abrir Configuración de la aplicación")
@@ -101,7 +128,7 @@ pub fn render_command_palette(view: Entity<DiffView>) -> impl IntoElement {
                 .keys("secondary-,"),
             Command::new("toggle_theme", "Alternar tema (Claro / Oscuro)")
                 .icon(IconName::Sun)
-                .keys("secondary-t"),
+                .keys("secondary-shift-t"),
         ],
     )
     .on_run({

@@ -23,6 +23,7 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `src/gui.rs`: orquestador de ciclo de vida, estado (`DiffView`), carga de archivos y dispatch principal de render.
   - `src/gui/types.rs`: enums y structs de presentación (`Density`, `ViewMode`, `SettingsTab`).
   - `src/gui/shortcuts.rs`: catálogo de atajos (`Shortcut`), listeners globales de teclado y dispatch de comandos.
+  - `src/gui/components/project_bar.rs`: barra horizontal de pestañas (Tabs) de proyectos, creación rápida con `+`, renombrado reactivo, duplicación, guardado y cierre de pestañas.
   - `src/gui/components/cell.rs`: funciones reutilizables de renderizado de celdas (micro-badges `+ Nuevo`, `≠ Tipo`, `Ausente`, chips de tipo, gutters numéricos de 32px y tooltips).
   - `src/gui/components/toolbar.rs`: barra superior de herramientas con selectores segmentados, inputs de búsqueda y selector JSONPath, badges y botones de acción.
   - `src/gui/components/table_view.rs`: vista Tabla matricial virtualizada con `uniform_list`, reordenamiento interactivo, base dinámica y estados vacíos reactivos.
@@ -81,4 +82,5 @@ Usa `gpui-pre =0.3.8`, `gpui-pre-platform =0.3.8` (con `font-kit`) y `ely-gpui-c
 - [x] Modal de Configuración de la aplicación (`Dialog` con secciones generales y catálogo reactivo de atajos).
 - [x] Modo de visualización compacto / densidad configurable (`Ctrl+D`, botón en toolbar y ajustes) con ~40% más filas visibles.
 - [x] Carga incremental y gestión de archivos (agregar hasta 10 JSON en cualquier momento desde toolbar, drag & drop, atajo `Ctrl+Shift+O` y modal de Configuración sin perder los archivos previos).
+- [x] Sistema de proyectos de comparación y pestañas múltiples (Workspace con guardado persistente, exportación/importación JSON, pestañas con cambio rápido `Ctrl+Tab`, duplicación y gestión en configuración).
 - [ ] Comparar arreglos por clave (p. ej. por `id`) en vez de por índice.

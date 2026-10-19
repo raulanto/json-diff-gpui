@@ -7,7 +7,7 @@ use ely_gpui_component::{
     data_display::{Badge, Tone},
     forms::Input,
     primitives::{Icon, IconName},
-    theme::{ActiveTheme, ControlSize, IconSize, Mode, Theme},
+    theme::{ActiveTheme, ControlSize, IconSize},
 };
 use gpui::{div, prelude::*, px, ClipboardItem, Context, Entity, IntoElement};
 use jsondiff::{export_markdown, DiffMode};
@@ -272,50 +272,6 @@ pub fn render_toolbar(
                             }),
                         )
                     },
-                )
-                .child(
-                    IconButton::new("cmd_palette_btn", IconName::Command)
-                        .size(ControlSize::Sm)
-                        .tooltip("Paleta de comandos (Ctrl+K)")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.show_command_palette = !this.show_command_palette;
-                            this.show_settings = false;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    IconButton::new("settings_btn", IconName::Settings)
-                        .size(ControlSize::Sm)
-                        .tooltip("Configuración (Ctrl+,)")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.show_settings = !this.show_settings;
-                            this.show_command_palette = false;
-                            cx.notify();
-                        })),
-                )
-                .child(
-                    IconButton::new(
-                        "theme_toggle",
-                        if cx.theme().is_dark() {
-                            IconName::Sun
-                        } else {
-                            IconName::Moon
-                        },
-                    )
-                    .size(ControlSize::Sm)
-                    .tooltip(if cx.theme().is_dark() {
-                        "Modo claro (Ctrl+T)"
-                    } else {
-                        "Modo oscuro (Ctrl+T)"
-                    })
-                    .on_click(move |_, _, cx| {
-                        let next = if cx.theme().is_dark() {
-                            Mode::Light
-                        } else {
-                            Mode::Dark
-                        };
-                        Theme::set_mode(next, cx);
-                    }),
                 ),
         )
 }

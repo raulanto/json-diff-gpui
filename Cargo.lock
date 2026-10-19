@@ -3432,6 +3432,7 @@ dependencies = [
  "ely-gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
+ "serde",
  "serde_json",
 ]
 
