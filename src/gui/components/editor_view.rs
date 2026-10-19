@@ -1,8 +1,8 @@
-//! Vista de Editor de código interactivo (CodeEditor) con marcas Git y acciones de guardado.
+//! Vista de Editor de código interactivo (CodeEditor) con marcas Git, buscador y panel de JSON Schema.
 
 use crate::gui::DiffView;
 use ely_gpui_component::{
-    buttons::{Button, ButtonVariant},
+    buttons::{Button, ButtonVariant, IconButton},
     data_display::{Badge, Tone},
     editor::{FindWidget, GitMark},
     git::{diff, LineKind, Stretch},
@@ -11,6 +11,31 @@ use ely_gpui_component::{
     theme::{ActiveTheme, ControlSize, TextSize},
 };
 use gpui::{div, prelude::*, px, Axis, Context, Entity, IntoElement};
+
+/// Trunca nombres largos conservando inicio, elipsis y sufijo con extensión.
+fn truncate_filename(name: &str, max_chars: usize) -> String {
+    let char_count = name.chars().count();
+    if char_count <= max_chars {
+        return name.to_string();
+    }
+    let ext = if name.ends_with(".json") { ".json" } else { "" };
+    let stem = if ext.is_empty() {
+        name
+    } else {
+        &name[..name.len() - ext.len()]
+    };
+    let keep = max_chars.saturating_sub(ext.len() + 1);
+    let head = keep * 2 / 3;
+    let tail = keep.saturating_sub(head);
+
+    let stem_chars: Vec<char> = stem.chars().collect();
+    if stem_chars.len() <= keep {
+        return name.to_string();
+    }
+    let prefix: String = stem_chars.iter().take(head).collect();
+    let suffix: String = stem_chars.iter().skip(stem_chars.len() - tail).collect();
+    format!("{prefix}…{suffix}{ext}")
+}
 
 /// Calcula marcas en el gutter (líneas añadidas) para el editor comparando contra el archivo base.
 pub fn compute_git_marks(base: &str, current: &str) -> Vec<(usize, GitMark)> {
@@ -55,16 +80,17 @@ pub fn render_editor_view(
         .map(|f| f.name.clone())
         .unwrap_or_else(|| "documento.json".to_string());
 
-    // Selector de archivos en el editor
+    // Selector de archivos en el editor con truncado inteligente
     let mut file_tabs = div().flex().flex_row().items_center().gap_1();
     for (i, f) in c.files.iter().enumerate() {
         let is_active = i == current_file_idx;
         let view = view.clone();
+        let short_name = truncate_filename(&f.name, 18);
         let label = format!(
             "[{}] {}{}",
             i + 1,
-            f.name,
-            if i == base_idx { " (Base)" } else { "" }
+            short_name,
+            if i == base_idx { " *" } else { "" }
         );
         file_tabs = file_tabs.child(
             Button::new(("editor_file_tab", i), label)
@@ -98,25 +124,31 @@ pub fn render_editor_view(
         .bg(colors.sunken)
         .border_b_1()
         .border_color(colors.border)
+        // Lado izquierdo con tabs y badge base
         .child(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap_3()
+                .gap_2()
+                .min_w_0()
+                .flex_1()
+                .overflow_hidden()
                 .child(file_tabs)
                 .child(if is_base {
-                    Badge::new("Archivo Base").tone(Tone::Accent).dot()
+                    Badge::new("Base").tone(Tone::Accent).dot()
                 } else {
-                    Badge::new("Marcas Git").tone(Tone::Info).dot()
+                    Badge::new("Git").tone(Tone::Info).dot()
                 }),
         )
+        // Lado derecho con acciones garantizadas sin desbordamiento
         .child(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap_1p5()
+                .flex_shrink_0()
                 .child(
                     Button::new("btn_find_editor", "Buscar")
                         .size(ControlSize::Sm)
@@ -150,10 +182,9 @@ pub fn render_editor_view(
                         }),
                 )
                 .child(
-                    Button::new("validate_json", "Validar")
+                    IconButton::new("validate_json", IconName::Check)
                         .size(ControlSize::Sm)
-                        .variant(ButtonVariant::Ghost)
-                        .icon(IconName::Check)
+                        .tooltip("Validar sintaxis JSON")
                         .on_click({
                             let view = view.clone();
                             move |_, _, cx| {
@@ -164,7 +195,7 @@ pub fn render_editor_view(
                         }),
                 )
                 .child(
-                    Button::new("apply_diff", "Aplicar al Diff")
+                    Button::new("apply_diff", "Aplicar")
                         .size(ControlSize::Sm)
                         .primary()
                         .icon(IconName::RefreshCw)
@@ -191,14 +222,23 @@ pub fn render_editor_view(
                             }
                         }),
                 )
-                .child(
-                    Button::new("btn_toggle_schema_panel", "Panel Schema")
+                .child(if state.show_schema_panel {
+                    IconButton::new("btn_toggle_schema_panel", IconName::PanelRight)
                         .size(ControlSize::Sm)
-                        .variant(if state.show_schema_panel {
-                            ButtonVariant::Primary
-                        } else {
-                            ButtonVariant::Ghost
+                        .tooltip("Ocultar panel lateral de Schema (Ctrl+J)")
+                        .on_click({
+                            let view = view.clone();
+                            move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_schema_panel(window, cx);
+                                });
+                            }
                         })
+                        .into_any_element()
+                } else {
+                    Button::new("btn_toggle_schema_panel", "Ver Schema")
+                        .size(ControlSize::Sm)
+                        .variant(ButtonVariant::Primary)
                         .icon(IconName::PanelRight)
                         .on_click({
                             let view = view.clone();
@@ -207,8 +247,9 @@ pub fn render_editor_view(
                                     this.toggle_schema_panel(window, cx);
                                 });
                             }
-                        }),
-                ),
+                        })
+                        .into_any_element()
+                }),
         );
 
     // Widget flotante de búsqueda integrado con Ely
@@ -297,12 +338,16 @@ pub fn render_editor_view(
         .bg(colors.sunken)
         .border_b_1()
         .border_color(colors.border)
+        // Título del schema con truncado protegido
         .child(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap_2()
+                .min_w_0()
+                .flex_1()
+                .overflow_hidden()
                 .child(
                     div()
                         .text_color(colors.accent)
@@ -316,25 +361,27 @@ pub fn render_editor_view(
                         .child("JSON Schema"),
                 )
                 .child(Badge::new("Draft 2020-12").tone(Tone::Accent))
-                .child(Badge::new("Solo Lectura").tone(Tone::Neutral))
                 .child(
                     div()
                         .text_size(theme.text_size(TextSize::Xs))
                         .text_color(colors.fg_muted)
-                        .child(format!("({current_file_name})")),
+                        .truncate()
+                        .max_w(px(160.0))
+                        .child(format!("({})", truncate_filename(&current_file_name, 18))),
                 ),
         )
+        // Acciones del schema + botón de ocultar
         .child(
             div()
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap_1p5()
+                .flex_shrink_0()
                 .child(
-                    Button::new("btn_sync_schema_panel", "Sincronizar")
+                    IconButton::new("btn_sync_schema_panel", IconName::RefreshCw)
                         .size(ControlSize::Sm)
-                        .variant(ButtonVariant::Ghost)
-                        .icon(IconName::RefreshCw)
+                        .tooltip("Sincronizar schema con el editor")
                         .on_click({
                             let view = view.clone();
                             move |_, window, cx| {
@@ -373,6 +420,19 @@ pub fn render_editor_view(
                                 });
                             }
                         }),
+                )
+                .child(
+                    IconButton::new("btn_hide_schema_panel", IconName::X)
+                        .size(ControlSize::Sm)
+                        .tooltip("Ocultar panel de Schema (Ctrl+J)")
+                        .on_click({
+                            let view = view.clone();
+                            move |_, window, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.toggle_schema_panel(window, cx);
+                                });
+                            }
+                        }),
                 ),
         );
 
@@ -404,7 +464,7 @@ pub fn render_editor_view(
         .child(schema_element);
 
     if state.show_schema_panel {
-        SplitPane::new("editor_schema_split", Axis::Horizontal, px(260.0))
+        SplitPane::new("editor_schema_split", Axis::Horizontal, px(240.0))
             .sizes(&[0.55, 0.45])
             .pane(left_panel)
             .pane(right_panel)
