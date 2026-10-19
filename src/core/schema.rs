@@ -71,16 +71,12 @@ fn infer_type_schema(value: &Value) -> Value {
                 json!({ "type": "object" })
             } else {
                 let mut properties = Map::new();
-                let mut required = Vec::new();
                 for (k, v) in obj {
                     properties.insert(k.clone(), infer_type_schema(v));
-                    required.push(Value::String(k.clone()));
                 }
-                required.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
                 json!({
                     "type": "object",
-                    "properties": properties,
-                    "required": required
+                    "properties": properties
                 })
             }
         }

@@ -437,7 +437,6 @@ fn test_json_schema_generation() {
         "integer"
     );
 
-    let req = schema["required"].as_array().unwrap();
-    assert!(req.contains(&serde_json::Value::String("id".to_string())));
-    assert!(req.contains(&serde_json::Value::String("name".to_string())));
+    assert!(schema.get("required").is_none());
+    assert!(props["metadata"].get("required").is_none());
 }
