@@ -64,15 +64,15 @@ pub fn render_toolbar(
                             .on_click(cx.listener(|this, _, _, cx| this.clear_files(cx))),
                     )
                 })
-                .when(state.comparison.is_some(), |bar| {
+                .when(state.comparison.is_some() && state.view_mode != ViewMode::Home, |bar| {
                     let view = view.clone();
                     bar.child(
                         SegmentedControl::new(
                             "view_mode",
                             match state.view_mode {
-                                ViewMode::Table => "table",
                                 ViewMode::GitDiff => "git",
                                 ViewMode::Editor => "editor",
+                                _ => "table",
                             },
                         )
                         .size(ControlSize::Sm)
@@ -91,6 +91,21 @@ pub fn render_toolbar(
                                 cx.notify();
                             });
                         }),
+                    )
+                })
+                .when(state.comparison.is_some() && state.view_mode == ViewMode::Home, |bar| {
+                    let view = view.clone();
+                    bar.child(
+                        Button::new("btn_return_to_diff", "Volver al proyecto activo")
+                            .size(ControlSize::Sm)
+                            .variant(ButtonVariant::Outline)
+                            .icon(IconName::ArrowRight)
+                            .on_click(move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.view_mode = ViewMode::Table;
+                                    cx.notify();
+                                });
+                            }),
                     )
                 }),
         )

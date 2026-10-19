@@ -21,6 +21,9 @@ pub fn render_command_palette(view: Entity<DiffView>) -> impl IntoElement {
     .group(
         "Navegación y Vistas",
         vec![
+            Command::new("view_home", "Ir al Lobby (Inicio / Proyectos)")
+                .icon(IconName::House)
+                .keys("secondary-h"),
             Command::new("view_table", "Ver: Tabla matricial")
                 .icon(IconName::Table)
                 .keys("secondary-1"),

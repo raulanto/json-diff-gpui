@@ -91,8 +91,12 @@ impl gpui::Render for DiffView {
                     )
                 })
                 .into_any_element()
+        } else if self.view_mode == ViewMode::Home {
+            components::empty_view::render_empty_view(self, view.clone(), cx).into_any_element()
         } else if self.comparison.is_some() {
             match self.view_mode {
+                ViewMode::Home => components::empty_view::render_empty_view(self, view.clone(), cx)
+                    .into_any_element(),
                 ViewMode::Table => {
                     components::table_view::render_table_view(self, view.clone(), cx)
                         .into_any_element()

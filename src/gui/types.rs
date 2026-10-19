@@ -35,8 +35,10 @@ impl Density {
 }
 
 /// Modos de visualización integrados en la aplicación.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ViewMode {
+    Home,
+    #[default]
     Table,
     GitDiff,
     Editor,

@@ -40,6 +40,7 @@ pub fn render_status_bar(
 
     // 2. Modo de visualización actual
     let mode_label = match state.view_mode {
+        ViewMode::Home => "Inicio / Proyectos",
         ViewMode::Table => "Tabla",
         ViewMode::GitDiff => "Git Diff",
         ViewMode::Editor => "Editor",
@@ -113,7 +114,7 @@ pub fn render_status_bar(
             let total = state.visible.len().max(1);
             (total, 1, 0)
         }
-        ViewMode::GitDiff => (1, 1, 0),
+        ViewMode::GitDiff | ViewMode::Home => (1, 1, 0),
     };
 
     let mut cursor = CursorPosition::new("sb_cursor_position", line, col);

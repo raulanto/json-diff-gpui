@@ -55,8 +55,14 @@ pub fn render_empty_view(
     )
     .on_action(move |index, window, cx| {
         view_actions.update(cx, |this, cx| match index {
-            0 => this.pick_files(cx),
-            1 => this.new_project_tab(None, window, cx),
+            0 => {
+                this.pick_files(cx);
+                this.view_mode = crate::gui::types::ViewMode::Table;
+            }
+            1 => {
+                this.new_project_tab(None, window, cx);
+                this.view_mode = crate::gui::types::ViewMode::Table;
+            }
             2 => this.save_current_project_bundle(window, cx),
             3 => {
                 this.show_command_palette = true;

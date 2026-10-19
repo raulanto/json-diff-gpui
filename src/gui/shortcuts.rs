@@ -38,6 +38,11 @@ pub fn shortcuts_list() -> Vec<Shortcut> {
             keys: "escape".into(),
         },
         Shortcut {
+            group: "General & Navegación".into(),
+            name: "Ir al Lobby (Inicio / Proyectos)".into(),
+            keys: "secondary-h".into(),
+        },
+        Shortcut {
             group: "Vistas".into(),
             name: "Ver: Tabla matricial".into(),
             keys: "secondary-1".into(),
@@ -140,6 +145,11 @@ pub fn run_command_action(
     state.show_command_palette = false;
 
     match action {
+        "view_home" => {
+            state.view_mode = ViewMode::Home;
+            state.editor = None;
+            cx.notify();
+        }
         "view_table" => {
             state.view_mode = ViewMode::Table;
             state.editor = None;
@@ -422,6 +432,13 @@ pub fn handle_global_key(
             state.show_toast("Reporte Markdown copiado al portapapeles", cx);
             return true;
         }
+    }
+
+    if ctrl_or_cmd && key.eq_ignore_ascii_case("h") {
+        state.view_mode = ViewMode::Home;
+        state.editor = None;
+        cx.notify();
+        return true;
     }
 
     if ctrl_or_cmd && key == "1" {

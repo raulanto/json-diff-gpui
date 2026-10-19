@@ -67,6 +67,7 @@ pub fn render_project_bar(
         });
 
     let view_new = view.clone();
+    let view_home = view.clone();
     let view_rename = view.clone();
     let view_save = view.clone();
     let view_load = view.clone();
@@ -98,6 +99,20 @@ pub fn render_project_bar(
                 .flex()
                 .flex_row()
                 .items_center()
+                .child(
+                    div().px_1().child(
+                        IconButton::new("btn_home_project_bar", IconName::House)
+                            .size(ControlSize::Sm)
+                            .tooltip("Inicio / Crear proyecto")
+                            .on_click(move |_, _, cx| {
+                                view_home.update(cx, |this, cx| {
+                                    this.view_mode = crate::gui::types::ViewMode::Home;
+                                    cx.notify();
+                                });
+                            }),
+                    ),
+                )
+                .child(div().h(px(16.0)).w(px(1.0)).bg(colors.border).mr_1())
                 .child(div().flex_1().min_w_0().child(project_tabs))
                 .child(
                     div().px_1().child(

@@ -59,11 +59,18 @@ impl DiffView {
         cx: &mut Context<Self>,
     ) {
         if self.workspace.active_project_id.as_deref() == Some(id) {
+            if self.view_mode == crate::gui::types::ViewMode::Home {
+                self.view_mode = crate::gui::types::ViewMode::Table;
+                cx.notify();
+            }
             return;
         }
         self.sync_current_project_state();
         if self.workspace.select_tab(id) {
             self.load_active_project(window, cx);
+            if self.view_mode == crate::gui::types::ViewMode::Home {
+                self.view_mode = crate::gui::types::ViewMode::Table;
+            }
             if let Some(proj) = self.workspace.active_project() {
                 self.show_toast(format!("Pestaña: {}", proj.name), cx);
             }
@@ -83,6 +90,7 @@ impl DiffView {
             p.name.clone()
         };
         self.load_active_project(window, cx);
+        self.view_mode = crate::gui::types::ViewMode::Table;
         self.show_toast(format!("Nuevo proyecto: {proj_name}"), cx);
     }
 
@@ -461,6 +469,7 @@ impl DiffView {
                 self.sync_current_project_state();
                 self.workspace.add_project(proj);
                 self.load_active_project(window, cx);
+                self.view_mode = crate::gui::types::ViewMode::Table;
                 self.show_toast(
                     format!("Proyecto '{proj_name}' abierto con {file_count} archivos JSON"),
                     cx,
