@@ -1,4 +1,4 @@
-//! Pantalla de bienvenida construida con WelcomePage de Ely Components y zona de DropZone.
+//! Pantalla de bienvenida construida con WelcomePage de Ely Components y zona de DropZone interactiva.
 
 use crate::gui::DiffView;
 use ely_gpui_component::{
@@ -8,7 +8,8 @@ use ely_gpui_component::{
 };
 use gpui::{div, prelude::*, px, Context, Entity, FontWeight, IntoElement};
 
-/// Renderiza la vista de bienvenida utilizando WelcomePage de Ely Components.
+/// Renderiza la vista de bienvenida utilizando WelcomePage de Ely Components,
+/// adaptada para abarcar todo el contenedor y ofrecer máxima legibilidad y espacio.
 pub fn render_empty_view(
     state: &DiffView,
     view: Entity<DiffView>,
@@ -57,7 +58,7 @@ pub fn render_empty_view(
         });
     });
 
-    // Proyectos recientes del workspace
+    // Proyectos del espacio de trabajo con formato limpio y espacioso
     let recent_projects_list: Vec<Project> = state
         .workspace
         .projects
@@ -68,7 +69,7 @@ pub fn render_empty_view(
             let subtitle = if count == 0 {
                 "Sin archivos cargados".to_string()
             } else {
-                format!("{count} archivos JSON")
+                format!("{count} archivos JSON configurados")
             };
             Project {
                 name: proj.name.clone().into(),
@@ -78,7 +79,7 @@ pub fn render_empty_view(
                 } else {
                     None
                 },
-                opened: "Workspace".into(),
+                opened: "".into(),
                 pinned: is_active,
             }
         })
@@ -105,19 +106,28 @@ pub fn render_empty_view(
             });
         });
 
+    let view_pick = view.clone();
     let drop_hint = div()
+        .id("welcome_dropzone")
         .flex()
         .flex_col()
         .items_center()
         .justify_center()
         .gap_2()
-        .p_4()
-        .mt_3()
+        .p_6()
+        .mt_4()
         .rounded(theme.radius(Radius::Md))
         .border_1()
         .border_dashed()
-        .border_color(colors.border)
-        .bg(colors.surface.opacity(0.4))
+        .border_color(colors.border_strong)
+        .bg(colors.surface.opacity(0.3))
+        .cursor_pointer()
+        .hover(|el| el.bg(colors.hover).border_color(colors.accent))
+        .on_click(move |_, _, cx| {
+            view_pick.update(cx, |this, cx| {
+                this.pick_files(cx);
+            });
+        })
         .child(
             div()
                 .flex()
@@ -131,36 +141,43 @@ pub fn render_empty_view(
                         .size(IconSize::Sm)
                         .color(colors.accent),
                 )
-                .child("Arrastra archivos JSON a esta ventana"),
+                .child("Arrastra archivos JSON a esta ventana o haz clic para seleccionarlos"),
         )
         .child(
             div()
                 .text_size(theme.text_size(TextSize::Xs))
                 .text_color(colors.fg_muted)
                 .text_center()
-                .child("Soporta de 2 a 10 archivos para comparación simultánea o secuencial"),
+                .child(
+                    "Soporta de 2 a 10 archivos para comparación matricial simultánea o secuencial",
+                ),
         );
 
     let recent_container = div()
         .flex()
         .flex_col()
-        .gap_2()
+        .flex_1()
+        .gap_3()
         .child(recent_widget)
         .child(drop_hint);
 
     let welcome = welcome.recent(recent_container);
 
     div()
+        .id("welcome_container")
         .flex()
         .flex_col()
         .flex_1()
-        .items_center()
-        .justify_center()
-        .p_8()
+        .size_full()
+        .p_6()
+        .overflow_y_scroll()
         .child(
             div()
-                .w_full()
-                .max_w(px(720.0))
+                .flex()
+                .flex_col()
+                .flex_1()
+                .size_full()
+                .min_h(px(520.0))
                 .rounded(theme.radius(Radius::Lg))
                 .border_1()
                 .border_color(colors.border)
