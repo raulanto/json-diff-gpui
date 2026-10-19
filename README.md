@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.svg" width="96" height="96" alt="json-diff-gpui icon" />
+</p>
+
 # json-diff-gpui
 
 Herramienta de escritorio en **Rust + [GPUI](https://www.gpui.rs/)** para comparar de **2 a 10 archivos JSON** y ver de inmediato **qué campos y qué líneas cambiaron**.

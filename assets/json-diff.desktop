@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=JSON Diff
+Comment=Comparador y Editor de JSON (Rust + GPUI)
+Exec=json-diff %F
+Icon=json-diff
+Terminal=false
+Type=Application
+Categories=Development;Utility;TextEditor;
+MimeType=application/json;
+Keywords=json;diff;compare;editor;
+StartupWMClass=json-diff
