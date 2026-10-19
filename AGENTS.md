@@ -19,13 +19,18 @@ Comparar de 2 a 6 archivos JSON y mostrar qué campos/líneas cambiaron. Ver `RE
   - `matches_filter` filtra filas por ruta o valor.
   - `export_markdown` y `export_csv` generan reportes tabulares estructurados.
   - `text_report` alimenta el modo `--cli`.
-- `src/gui.rs`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Integra:
-  - Vista Tabla (Matriz virtualizada con `uniform_list`, selector de estructura JSONPath reactivo con botón de restauración a `$`, selector dinámico de densidad Compacta / Cómoda con filas optimizadas de 26px/36px, celdas enriquecidas con micro-badges, gutter de líneas alineado a 32px, chips de tipo, resaltado sutil de diferencias contra la base y distinción jerárquica de rutas).
-  - Vista Diff Git (`DiffViewer` en modo Unified y Split con estadísticas `DiffStat`).
-  - Vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
-  - Paleta de Comandos (`CommandPalette` de Ely con búsqueda difusa, navegación por flechas y ejecución con Enter).
-  - Modal de Configuración (`Dialog`, `SettingsSection`, `SettingsRow` y `KeyboardShortcutsList` con catálogo reactivo de atajos).
-  - Atajos de teclado globales (`capture_key_down` con `Ctrl+K`, `Ctrl+,`, `Ctrl+O`, `Ctrl+1..3`, `Ctrl+M`, `Ctrl+D`, `Ctrl+Shift+C`, `Ctrl+Shift+M`, `Ctrl+Shift+I`, `Ctrl+S`, `Ctrl+T`, `Esc`).
+- `src/gui.rs` y `src/gui/`: solo presentación (feature `gui`), construida con Ely Components (`ely-gpui-component`) y `gpui-pre 0.3.8`. No debe contener lógica de comparación. Arquitectura modular desacoplada:
+  - `src/gui.rs`: orquestador de ciclo de vida, estado (`DiffView`), carga de archivos y dispatch principal de render.
+  - `src/gui/types.rs`: enums y structs de presentación (`Density`, `ViewMode`, `SettingsTab`).
+  - `src/gui/shortcuts.rs`: catálogo de atajos (`Shortcut`), listeners globales de teclado y dispatch de comandos.
+  - `src/gui/components/cell.rs`: funciones reutilizables de renderizado de celdas (micro-badges `+ Nuevo`, `≠ Tipo`, `Ausente`, chips de tipo, gutters numéricos de 32px y tooltips).
+  - `src/gui/components/toolbar.rs`: barra superior de herramientas con selectores segmentados, inputs de búsqueda y selector JSONPath, badges y botones de acción.
+  - `src/gui/components/table_view.rs`: vista Tabla matricial virtualizada con `uniform_list`, reordenamiento interactivo, base dinámica y estados vacíos reactivos.
+  - `src/gui/components/git_view.rs`: vista Diff Git (`DiffViewer` en modo Unified y Split con selector dinámico de destino y estadísticas).
+  - `src/gui/components/editor_view.rs`: vista Editor (`CodeEditor` interactivo, gutter con `GitMark` contra la base, formateo, validación sintáctica, aplicación en caliente y guardado en disco).
+  - `src/gui/components/empty_view.rs`: pantalla de bienvenida / DropZone con atajos rápidos.
+  - `src/gui/components/command_palette.rs`: paleta de comandos interactiva (`CommandPalette` de Ely con búsqueda difusa y grupos categorizados).
+  - `src/gui/components/settings_dialog.rs`: modal de Configuración (`Dialog`, `SettingsSection`, `SettingsRow` y `KeyboardShortcutsList` con catálogo reactivo de atajos).
 - `src/main.rs`: parseo de argumentos y arranque. Con `--no-default-features` solo existe el modo CLI (soporta `-s|--selector <QUERY>`).
 
 Regla: cualquier cambio de comportamiento se implementa en `lib.rs` con prueba; la UI solo lo consume.
